@@ -1,0 +1,18 @@
+include MANIFEST.in
+include requirements.txt
+include *.json
+include *.md
+include *.py
+include *.txt
+recursive-include jira *.css
+recursive-include jira *.csv
+recursive-include jira *.html
+recursive-include jira *.ico
+recursive-include jira *.js
+recursive-include jira *.json
+recursive-include jira *.md
+recursive-include jira *.png
+recursive-include jira *.py
+recursive-include jira *.svg
+recursive-include jira *.txt
+recursive-exclude jira *.pyc
