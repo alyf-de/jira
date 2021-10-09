@@ -1,0 +1,98 @@
+{
+ "actions": [],
+ "allow_rename": 1,
+ "creation": "2021-10-07 18:32:40.937340",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "url",
+  "last_synced_on",
+  "column_break_2",
+  "api_user",
+  "api_key",
+  "section_break_4",
+  "jira_projects_section",
+  "mappings",
+  "user_billing_section",
+  "billing"
+ ],
+ "fields": [
+  {
+   "fieldname": "jira_projects_section",
+   "fieldtype": "Section Break",
+   "label": "Jira Projects Mapping"
+  },
+  {
+   "fieldname": "mappings",
+   "fieldtype": "Table",
+   "label": "Mappings",
+   "options": "Jira Project Mapping"
+  },
+  {
+   "description": "https://your-domain.atlassian.net",
+   "fieldname": "url",
+   "fieldtype": "Data",
+   "label": "URL",
+   "options": "URL"
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Data",
+   "label": "API Key"
+  },
+  {
+   "fieldname": "section_break_4",
+   "fieldtype": "Section Break"
+  },
+  {
+   "fieldname": "user_billing_section",
+   "fieldtype": "Section Break",
+   "label": "User Billing Details"
+  },
+  {
+   "fieldname": "billing",
+   "fieldtype": "Table",
+   "label": "Billing",
+   "options": "Jira Project Cost"
+  },
+  {
+   "fieldname": "api_user",
+   "fieldtype": "Data",
+   "label": "API User",
+   "options": "Email"
+  },
+  {
+   "fieldname": "last_synced_on",
+   "fieldtype": "Datetime",
+   "label": "Last Synced On"
+  }
+ ],
+ "index_web_pages_for_search": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2021-10-09 17:29:27.763816",
+ "modified_by": "Administrator",
+ "module": "Jira Integration",
+ "name": "Jira Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "modified",
+ "sort_order": "DESC",
+ "track_changes": 1
+}

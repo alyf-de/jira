@@ -100,23 +100,11 @@ app_license = "MIT"
 # Scheduled Tasks
 # ---------------
 
-# scheduler_events = {
-# 	"all": [
-# 		"jira.tasks.all"
-# 	],
-# 	"daily": [
-# 		"jira.tasks.daily"
-# 	],
-# 	"hourly": [
-# 		"jira.tasks.hourly"
-# 	],
-# 	"weekly": [
-# 		"jira.tasks.weekly"
-# 	]
-# 	"monthly": [
-# 		"jira.tasks.monthly"
-# 	]
-# }
+scheduler_events = {
+	"daily": [
+		"jira.tasks.daily.pull_issues_from_jira"
+	]
+}
 
 # Testing
 # -------
