@@ -11,23 +11,23 @@ def pull_issues_from_jira():
 	if not jira_settings.enabled:
 		return
 
-	jira_client = JiraClient(jira_settings.url, jira_settings.api_user, jira_settings.api_key)
+	jira_client = JiraClient(jira_settings.url, jira_settings.api_user, jira_settings.get_password(fieldname="api_key"))
 	logs = {}
 
-	for user_details in jira_settings.billing:
-		issues = jira_client.get_issues_by_assignee(user_details.user)
+	for mapping in jira_settings.mappings:
+		issues = jira_client.get_issues_for_project(mapping.jira_project_key)
 
 		for issue in issues.get("issues", []):
-			issue = jira_client.get_issue(issue.get("id"))
-			project = issue.get("fields", {}).get("project", {}).get("name")
-
 			worklogs = jira_client.get_timelogs_by_issue(issue.get("id"), started_after=jira_settings.last_synced_on)
 
 			for worklog in worklogs.get("worklogs", []):
-				if not logs.get(f"{project}::{user_details.user}", None):
-					logs[f"{project}::{user_details.user}"] = []
+				email_address = worklog.get("author", {}).get("emailAddress", None)
+				jira_user_account_id = worklog.get("author", {}).get("accountId", None)
 
-				logs[f"{project}::{user_details.user}"].append(worklog)
+				if not logs.get(f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}", None):
+					logs[f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}"] = []
+
+				logs[f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}"].append(worklog)
 
 	create_timesheets(jira_settings, logs)
 	jira_settings.last_synced_on = now_datetime()
@@ -38,7 +38,7 @@ def get_project_map(jira_settings):
 	project_map = {}
 
 	for project in jira_settings.mappings:
-		project_map[project.jira_project] = {
+		project_map[project.jira_project_key] = {
 			"erpnext_project": project.erpnext_project,
 			"billing_rate": project.billing_rate
 		}
@@ -60,22 +60,21 @@ def create_timesheets(jira_settings, worklogs):
 	user_cost_map = get_user_costing(jira_settings)
 
 	for worklog in worklogs:
-		details = worklog.split("::")
-		project = details[0]
-		user = details[1]
+		project, user, jira_user_account_id = worklog.split("::")
+		employee = frappe.db.get_value("Employee", {"user_id": user})
 
-		employee = frappe.db.get_value("Employee", {"user_id": user}) or user
 		timesheet = frappe.new_doc("Timesheet")
 		timesheet.employee = employee
+		timesheet.jira_user_account_id = jira_user_account_id
 
 		for log in worklogs[worklog]:
-			base_billing_rate =  flt(project_map.get(project, {}).get("billing_rate", 0)) * timesheet.exchange_rate
-			base_costing_rate =  flt(user_cost_map.get(user, 0)) * timesheet.exchange_rate
+			base_billing_rate = flt(project_map.get(project, {}).get("billing_rate", 0)) * timesheet.exchange_rate
+			base_costing_rate = flt(user_cost_map.get(user, 0)) * timesheet.exchange_rate
 
-			billing_rate =  project_map.get(project, {}).get("billing_rate", 0)
-			costing_rate =  user_cost_map.get(user, 0)
+			billing_rate = project_map.get(project, {}).get("billing_rate", 0)
+			costing_rate = user_cost_map.get(user, 0)
 
-			billing_hours  =  log.get("timeSpentSeconds", 0) / 3600
+			billing_hours = log.get("timeSpentSeconds", 0) / 3600
 
 			timesheet.append("time_logs", {
 				"from_time": get_datetime_str(log.get("started")),
