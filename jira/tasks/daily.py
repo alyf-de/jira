@@ -8,6 +8,9 @@ from jira.jira_client import JiraClient
 
 def pull_issues_from_jira():
 	jira_settings = frappe.get_single("Jira Settings")
+	if not jira_settings.enabled:
+		return
+
 	jira_client = JiraClient(jira_settings.url, jira_settings.api_user, jira_settings.api_key)
 	logs = {}
 

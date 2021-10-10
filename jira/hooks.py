@@ -101,7 +101,7 @@ app_license = "MIT"
 # ---------------
 
 scheduler_events = {
-	"daily": [
+	"daily_long": [
 		"jira.tasks.daily.pull_issues_from_jira"
 	]
 }

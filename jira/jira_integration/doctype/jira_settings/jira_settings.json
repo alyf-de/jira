@@ -6,12 +6,13 @@
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
+  "enabled",
+  "api_configuration_section",
   "url",
   "last_synced_on",
   "column_break_2",
   "api_user",
   "api_key",
-  "section_break_4",
   "jira_projects_section",
   "mappings",
   "user_billing_section",
@@ -19,6 +20,7 @@
  ],
  "fields": [
   {
+   "depends_on": "enabled",
    "fieldname": "jira_projects_section",
    "fieldtype": "Section Break",
    "label": "Jira Projects Mapping"
@@ -27,6 +29,7 @@
    "fieldname": "mappings",
    "fieldtype": "Table",
    "label": "Mappings",
+   "mandatory_depends_on": "enabled",
    "options": "Jira Project Mapping"
   },
   {
@@ -34,6 +37,7 @@
    "fieldname": "url",
    "fieldtype": "Data",
    "label": "URL",
+   "mandatory_depends_on": "enabled",
    "options": "URL"
   },
   {
@@ -42,14 +46,12 @@
   },
   {
    "fieldname": "api_key",
-   "fieldtype": "Data",
-   "label": "API Key"
+   "fieldtype": "Password",
+   "label": "API Key",
+   "mandatory_depends_on": "enabled"
   },
   {
-   "fieldname": "section_break_4",
-   "fieldtype": "Section Break"
-  },
-  {
+   "depends_on": "enabled",
    "fieldname": "user_billing_section",
    "fieldtype": "Section Break",
    "label": "User Billing Details"
@@ -58,24 +60,39 @@
    "fieldname": "billing",
    "fieldtype": "Table",
    "label": "Billing",
+   "mandatory_depends_on": "enabled",
    "options": "Jira Project Cost"
   },
   {
    "fieldname": "api_user",
    "fieldtype": "Data",
    "label": "API User",
+   "mandatory_depends_on": "enabled",
    "options": "Email"
   },
   {
    "fieldname": "last_synced_on",
    "fieldtype": "Datetime",
-   "label": "Last Synced On"
+   "label": "Last Synced On",
+   "read_only": 1
+  },
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "depends_on": "enabled",
+   "fieldname": "api_configuration_section",
+   "fieldtype": "Section Break",
+   "label": "API Configuration"
   }
  ],
  "index_web_pages_for_search": 1,
  "issingle": 1,
  "links": [],
- "modified": "2021-10-09 17:29:27.763816",
+ "modified": "2021-10-10 18:01:54.159143",
  "modified_by": "Administrator",
  "module": "Jira Integration",
  "name": "Jira Settings",
