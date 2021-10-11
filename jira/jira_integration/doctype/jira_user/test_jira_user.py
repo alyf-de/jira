@@ -4,5 +4,5 @@
 # import frappe
 import unittest
 
-class TestJiraSettings(unittest.TestCase):
+class TestJiraUser(unittest.TestCase):
 	pass

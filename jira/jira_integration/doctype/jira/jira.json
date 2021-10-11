@@ -1,7 +1,8 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2021-10-07 18:32:40.937340",
+ "autoname": "field:url",
+ "creation": "2021-10-11 20:06:33.851972",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
@@ -20,6 +21,51 @@
  ],
  "fields": [
   {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "depends_on": "enabled",
+   "fieldname": "api_configuration_section",
+   "fieldtype": "Section Break",
+   "label": "API Configuration"
+  },
+  {
+   "description": "https://your-domain.atlassian.net",
+   "fieldname": "url",
+   "fieldtype": "Data",
+   "label": "URL",
+   "mandatory_depends_on": "enabled",
+   "options": "URL",
+   "unique": 1
+  },
+  {
+   "fieldname": "last_synced_on",
+   "fieldtype": "Datetime",
+   "in_list_view": 1,
+   "label": "Last Synced On",
+   "read_only": 1
+  },
+  {
+   "fieldname": "column_break_2",
+   "fieldtype": "Column Break"
+  },
+  {
+   "fieldname": "api_user",
+   "fieldtype": "Data",
+   "label": "API User",
+   "mandatory_depends_on": "enabled",
+   "options": "Email"
+  },
+  {
+   "fieldname": "api_key",
+   "fieldtype": "Password",
+   "label": "API Key",
+   "mandatory_depends_on": "enabled"
+  },
+  {
    "depends_on": "enabled",
    "fieldname": "jira_projects_section",
    "fieldtype": "Section Break",
@@ -30,25 +76,7 @@
    "fieldtype": "Table",
    "label": "Mappings",
    "mandatory_depends_on": "enabled",
-   "options": "Jira Project Mapping"
-  },
-  {
-   "description": "https://your-domain.atlassian.net",
-   "fieldname": "url",
-   "fieldtype": "Data",
-   "label": "URL",
-   "mandatory_depends_on": "enabled",
-   "options": "URL"
-  },
-  {
-   "fieldname": "column_break_2",
-   "fieldtype": "Column Break"
-  },
-  {
-   "fieldname": "api_key",
-   "fieldtype": "Password",
-   "label": "API Key",
-   "mandatory_depends_on": "enabled"
+   "options": "Jira Project"
   },
   {
    "depends_on": "enabled",
@@ -61,41 +89,15 @@
    "fieldtype": "Table",
    "label": "Billing",
    "mandatory_depends_on": "enabled",
-   "options": "Jira Project Cost"
-  },
-  {
-   "fieldname": "api_user",
-   "fieldtype": "Data",
-   "label": "API User",
-   "mandatory_depends_on": "enabled",
-   "options": "Email"
-  },
-  {
-   "fieldname": "last_synced_on",
-   "fieldtype": "Datetime",
-   "label": "Last Synced On",
-   "read_only": 1
-  },
-  {
-   "default": "0",
-   "fieldname": "enabled",
-   "fieldtype": "Check",
-   "label": "Enabled"
-  },
-  {
-   "depends_on": "enabled",
-   "fieldname": "api_configuration_section",
-   "fieldtype": "Section Break",
-   "label": "API Configuration"
+   "options": "Jira User Cost"
   }
  ],
  "index_web_pages_for_search": 1,
- "issingle": 1,
  "links": [],
- "modified": "2021-10-10 23:46:14.031232",
+ "modified": "2021-10-11 20:45:50.384432",
  "modified_by": "Administrator",
  "module": "Jira Integration",
- "name": "Jira Settings",
+ "name": "Jira",
  "owner": "Administrator",
  "permissions": [
   {

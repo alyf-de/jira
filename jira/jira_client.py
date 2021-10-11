@@ -23,7 +23,6 @@ class JiraClient:
 
 		response = requests.request("GET", url, headers=self.headers, params=params, auth=self.auth)
 
-		print(response.status_code, type(response.status_code), not response.status_code == 200)
 		if not response.status_code == 200:
 			self.handle_error(response)
 
@@ -68,9 +67,8 @@ class JiraClient:
 
 
 	def handle_error(self, response):
-		response_dump = json.dumps(json.loads(response.text), sort_keys=True, indent=4, separators=(",", ": "))
+		response_dump = json.dumps(json.loads(response.text or "{}"), sort_keys=True, indent=4, separators=(",", ": "))
 
-		print(response_dump)
 		if response.status_code == 400:
 			frappe.log_error(message=f"Jira Settings Error: Returned if the JQL query is invalid. \n {response_dump}")
 		elif response.status_code == 401:

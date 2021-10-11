@@ -1,36 +1,44 @@
 {
  "actions": [],
  "allow_rename": 1,
- "creation": "2021-10-07 18:59:11.345988",
+ "creation": "2021-10-07 18:34:53.332934",
  "doctype": "DocType",
  "editable_grid": 1,
  "engine": "InnoDB",
  "field_order": [
-  "user",
-  "costing_rate"
+  "jira_project_key",
+  "erpnext_project",
+  "billing_rate"
  ],
  "fields": [
   {
-   "fieldname": "user",
+   "fieldname": "erpnext_project",
    "fieldtype": "Link",
    "in_list_view": 1,
-   "label": "User",
-   "options": "User"
+   "label": "ERPNext Project",
+   "options": "Project"
   },
   {
-   "fieldname": "costing_rate",
+   "fieldname": "billing_rate",
    "fieldtype": "Currency",
    "in_list_view": 1,
-   "label": "Costing Rate"
+   "label": "Billing Rate"
+  },
+  {
+   "columns": 2,
+   "fieldname": "jira_project_key",
+   "fieldtype": "Data",
+   "in_list_view": 1,
+   "label": "Jira Project Key"
   }
  ],
  "index_web_pages_for_search": 1,
  "istable": 1,
  "links": [],
- "modified": "2021-10-09 12:54:51.513654",
+ "modified": "2021-10-10 23:43:50.275144",
  "modified_by": "Administrator",
  "module": "Jira Integration",
- "name": "Jira Project Cost",
+ "name": "Jira Project",
  "owner": "Administrator",
  "permissions": [],
  "sort_field": "modified",

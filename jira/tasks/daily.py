@@ -7,31 +7,30 @@ from jira.jira_client import JiraClient
 
 
 def pull_issues_from_jira():
-	jira_settings = frappe.get_single("Jira Settings")
-	if not jira_settings.enabled:
-		return
 
-	jira_client = JiraClient(jira_settings.url, jira_settings.api_user, jira_settings.get_password(fieldname="api_key"))
-	logs = {}
+	for jira in frappe.get_all("Jira", filters={"enabled": 1}):
+		jira_settings = frappe.get_doc("Jira", jira.name)
+		jira_client = JiraClient(jira_settings.url, jira_settings.api_user, jira_settings.get_password(fieldname="api_key"))
+		logs = {}
 
-	for mapping in jira_settings.mappings:
-		issues = jira_client.get_issues_for_project(mapping.jira_project_key)
+		for mapping in jira_settings.mappings:
+			issues = jira_client.get_issues_for_project(mapping.jira_project_key)
 
-		for issue in issues.get("issues", []):
-			worklogs = jira_client.get_timelogs_by_issue(issue.get("id"), started_after=jira_settings.last_synced_on)
+			for issue in issues.get("issues", []):
+				worklogs = jira_client.get_timelogs_by_issue(issue.get("id"), started_after=jira_settings.last_synced_on)
 
-			for worklog in worklogs.get("worklogs", []):
-				email_address = worklog.get("author", {}).get("emailAddress", None)
-				jira_user_account_id = worklog.get("author", {}).get("accountId", None)
+				for worklog in worklogs.get("worklogs", []):
+					email_address = worklog.get("author", {}).get("emailAddress", None)
+					jira_user_account_id = worklog.get("author", {}).get("accountId", None)
 
-				if not logs.get(f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}", None):
-					logs[f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}"] = []
+					if not logs.get(f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}", None):
+						logs[f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}"] = []
 
-				logs[f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}"].append(worklog)
+					logs[f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}"].append(worklog)
 
-	create_timesheets(jira_settings, logs)
-	jira_settings.last_synced_on = now_datetime()
-	jira_settings.save()
+		create_timesheets(jira_settings, logs)
+		jira_settings.last_synced_on = now_datetime()
+		jira_settings.save()
 
 
 def get_project_map(jira_settings):
@@ -50,7 +49,7 @@ def get_user_costing(jira_settings):
 	user_cost_map = {}
 
 	for user in jira_settings.billing:
-		user_cost_map[user.user] = user.costing_rate
+		user_cost_map[user.email] = user.costing_rate
 
 	return user_cost_map
 
