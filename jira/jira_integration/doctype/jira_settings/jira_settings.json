@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "field:url",
+ "autoname": "field:jira_account_name",
  "creation": "2021-10-11 20:06:33.851972",
  "doctype": "DocType",
  "editable_grid": 1,
@@ -9,6 +9,7 @@
  "field_order": [
   "enabled",
   "api_configuration_section",
+  "jira_account_name",
   "url",
   "last_synced_on",
   "column_break_2",
@@ -90,14 +91,20 @@
    "label": "Billing",
    "mandatory_depends_on": "enabled",
    "options": "Jira User Cost"
+  },
+  {
+   "fieldname": "jira_account_name",
+   "fieldtype": "Data",
+   "label": "Jira Account Name",
+   "unique": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2021-10-11 20:45:50.384432",
+ "modified": "2021-10-13 21:57:41.819900",
  "modified_by": "Administrator",
  "module": "Jira Integration",
- "name": "Jira",
+ "name": "Jira Settings",
  "owner": "Administrator",
  "permissions": [
   {

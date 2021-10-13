@@ -1,7 +1,7 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "format:{user}-{#####}",
+ "autoname": "format:{user}-{int(costing_rate + 0.5)}",
  "creation": "2021-10-11 20:08:20.644547",
  "doctype": "DocType",
  "editable_grid": 1,
@@ -13,10 +13,9 @@
  "fields": [
   {
    "fieldname": "user",
-   "fieldtype": "Link",
+   "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "User",
-   "options": "User"
+   "label": "User"
   },
   {
    "fieldname": "costing_rate",
@@ -27,7 +26,7 @@
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2021-10-11 20:08:20.644547",
+ "modified": "2021-10-13 20:10:26.772201",
  "modified_by": "Administrator",
  "module": "Jira Integration",
  "name": "Jira User",
