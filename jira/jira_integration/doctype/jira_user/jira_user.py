@@ -5,4 +5,5 @@
 from frappe.model.document import Document
 
 class JiraUser(Document):
-	pass
+	def autoname(self):
+		self.name = f"{self.user} - {int(self.costing_rate + 0.5)}"

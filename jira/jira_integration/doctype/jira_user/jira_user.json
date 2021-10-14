@@ -1,7 +1,6 @@
 {
  "actions": [],
  "allow_rename": 1,
- "autoname": "format:{user}-{int(costing_rate + 0.5)}",
  "creation": "2021-10-11 20:08:20.644547",
  "doctype": "DocType",
  "editable_grid": 1,
@@ -15,18 +14,21 @@
    "fieldname": "user",
    "fieldtype": "Data",
    "in_list_view": 1,
-   "label": "User"
+   "label": "User",
+   "options": "Email",
+   "reqd": 1
   },
   {
    "fieldname": "costing_rate",
    "fieldtype": "Currency",
    "in_list_view": 1,
-   "label": "Costing Rate"
+   "label": "Costing Rate",
+   "reqd": 1
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2021-10-13 20:10:26.772201",
+ "modified": "2021-10-14 18:51:59.684907",
  "modified_by": "Administrator",
  "module": "Jira Integration",
  "name": "Jira User",
