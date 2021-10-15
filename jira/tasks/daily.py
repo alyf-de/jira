@@ -29,14 +29,16 @@ def pull_issues_from_jira(project=None):
 
 			for issue in issues.get("issues", []):
 				_issue = jira_client.get_issue(issue.get("id"))
-				worklogs = jira_client.get_timelogs_by_issue(issue.get("id"))#, started_after=jira_settings.last_synced_on)
+				worklogs = jira_client.get_timelogs_by_issue(issue.get("id"), started_after=jira_settings.last_synced_on)
 
 				for worklog in worklogs.get("worklogs", []):
 					date = get_date_str(worklog.get("started"))
 					email_address = worklog.get("author", {}).get("emailAddress", None)
 					jira_user_account_id = worklog.get("author", {}).get("accountId", None)
 					worklog.update({
-						"issueURL": f"{jira_settings.url}/browse/{_issue.get('key')}"
+						"_issueKey": _issue.get('key'),
+						"issueURL": f"{jira_settings.url}/browse/{_issue.get('key')}",
+						"issueDescription": _issue.get("fields", {}).get("summary")
 					})
 
 					if not logs.get(date):
@@ -96,10 +98,10 @@ def create_timesheets(jira_settings, worklogs):
 
 				billing_hours = log.get("timeSpentSeconds", 0) / 3600
 
-				description = None
+				description = f"{log.get('_issueKey')}: {log.get('issueDescription')} - {log.get('issueURL')}\n"
 				for comment in log.get("comment", {}).get("content", []):
 					for comm in comment.get("content", []):
-						description = comm.get("text", "") if not description else " " + comm.get("text", "")
+						description += comm.get("text", "") + " "
 
 				timesheet.append("time_logs", {
 					"from_time": get_datetime_str(log.get("started")),
