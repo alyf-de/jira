@@ -21,6 +21,7 @@ def pull_issues_from_jira(project=None):
 
 	for jira in frappe.get_all("Jira Settings", filters=filters):
 		jira_settings = frappe.get_doc("Jira Settings", jira.name)
+		user_list = [user.email for user in jira_settings.billing]
 		jira_client = JiraClient(jira_settings.url, jira_settings.api_user, jira_settings.get_password(fieldname="api_key"))
 		logs = {}
 
@@ -34,6 +35,9 @@ def pull_issues_from_jira(project=None):
 				for worklog in worklogs.get("worklogs", []):
 					date = get_date_str(worklog.get("started"))
 					email_address = worklog.get("author", {}).get("emailAddress", None)
+					if not email_address in user_list:
+						continue
+
 					jira_user_account_id = worklog.get("author", {}).get("accountId", None)
 					worklog.update({
 						"_issueKey": _issue.get('key'),
@@ -98,7 +102,7 @@ def create_timesheets(jira_settings, worklogs):
 
 				billing_hours = log.get("timeSpentSeconds", 0) / 3600
 
-				description = f"{log.get('_issueKey')}: {log.get('issueDescription')} - {log.get('issueURL')}\n"
+				description = f"{log.get('_issueKey')}: {log.get('issueDescription')}\n"
 				for comment in log.get("comment", {}).get("content", []):
 					for comm in comment.get("content", []):
 						description += comm.get("text", "") + " "
