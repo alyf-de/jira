@@ -125,8 +125,12 @@ def create_timesheets(jira_settings, worklogs):
 
 				billing_hours = log.get("timeSpentSeconds", 0) / 3600
 
-				description = f"{log.get('_issueKey')}: {log.get('issueDescription')}\n"
+				description = f"{log.get('issueDescription')} ({log.get('_issueKey')})"
+				line_break = ":\n"
 				for comment in log.get("comment", {}).get("content", []):
+					if line_break not in description:
+						description += line_break
+
 					for comm in comment.get("content", []):
 						description += comm.get("text", "") + " "
 
