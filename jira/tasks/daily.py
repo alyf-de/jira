@@ -133,6 +133,7 @@ def create_timesheets(jira_settings, worklogs):
 				timesheet.append(
 					"time_logs",
 					{
+						"activity_type": jira_settings.activity_type,
 						"from_time": get_datetime_str(log.get("started")),
 						"hours": billing_hours,
 						"project": project_map.get(project, {}).get(

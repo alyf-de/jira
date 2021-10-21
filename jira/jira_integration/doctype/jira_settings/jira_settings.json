@@ -16,6 +16,7 @@
   "api_user",
   "api_key",
   "jira_projects_section",
+  "activity_type",
   "mappings",
   "user_billing_section",
   "billing"
@@ -97,11 +98,17 @@
    "fieldtype": "Data",
    "label": "Jira Account Name",
    "unique": 1
+  },
+  {
+   "fieldname": "activity_type",
+   "fieldtype": "Link",
+   "label": "Activity Type",
+   "options": "Activity Type"
   }
  ],
  "index_web_pages_for_search": 1,
  "links": [],
- "modified": "2021-10-13 21:57:41.819900",
+ "modified": "2021-10-21 16:15:56.500134",
  "modified_by": "Administrator",
  "module": "Jira Integration",
  "name": "Jira Settings",
