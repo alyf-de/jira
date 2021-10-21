@@ -11,9 +11,9 @@ def pull_issues_from_jira(project=None):
 	"""
 	Creates a dictionary with date as key and corresponding logs
 	{
-			"date": {
-					"project_key + email_address + account_id": [worklogs]
-			}
+		"date": {
+				"project_key + email_address + account_id": [worklogs]
+		}
 	}
 	"""
 	filters = {"enabled": 1}
@@ -106,9 +106,13 @@ def create_timesheets(jira_settings, worklogs):
 
 			project, user, jira_user_account_id = worklog.split("::")
 			employee = frappe.db.get_value("Employee", {"user_id": user})
+			erpnext_project = project_map.get(project, {}).get(
+				"erpnext_project", project
+			)
 
 			timesheet = frappe.new_doc("Timesheet")
 			timesheet.employee = employee
+			timesheet.parent_project = erpnext_project
 			timesheet.jira_user_account_id = jira_user_account_id
 
 			for log in worklogs[worklog_date][worklog]:
@@ -140,9 +144,7 @@ def create_timesheets(jira_settings, worklogs):
 						"activity_type": jira_settings.activity_type,
 						"from_time": get_datetime_str(log.get("started")),
 						"hours": billing_hours,
-						"project": project_map.get(project, {}).get(
-							"erpnext_project", project
-						),
+						"project": erpnext_project,
 						"is_billable": True,
 						"description": description,
 						"billing_hours": billing_hours,
