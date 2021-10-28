@@ -15,81 +15,79 @@ def pull_issues_from_jira(project=None):
 
 	for jira in frappe.get_all("Jira Settings", filters=filters):
 		jira_settings = frappe.get_doc("Jira Settings", jira.name)
-		logs = {}
-		pull_issues_from_jira_settings(jira_settings, logs)
-		create_timesheets(jira_settings, logs)
+		workspace = JiraWorkspace(jira_settings)
+		workspace.pull_issues()
+		create_timesheets(jira_settings, workspace.logs)
 		jira_settings.last_synced_on = now_datetime()
 		jira_settings.save()
 
 
-def pull_issues_from_jira_settings(jira_settings, logs):
-	user_list = [user.email for user in jira_settings.billing]
-	jira_client = get_jira_client(jira_settings)
-
-	for mapping in jira_settings.mappings:
-		issues = jira_client.get_issues_for_project(mapping.jira_project_key)
-		process_issues(
-			jira_settings,
-			user_list,
-			jira_client,
-			issues,
-			mapping.jira_project_key,
-			logs,
+class JiraWorkspace:
+	def __init__(self, jira_settings):
+		self.jira_settings = jira_settings
+		self.user_list = [user.email for user in self.jira_settings.billing]
+		self.jira_client = JiraClient(
+			jira_settings.url,
+			jira_settings.api_user,
+			jira_settings.get_password(fieldname="api_key"),
 		)
+		self.logs = {}
 
+	def pull_issues(self):
+		for mapping in self.jira_settings.mappings:
+			issues = self.jira_client.get_issues_for_project(mapping.jira_project_key)
+			self.process_issues(
+				issues,
+				mapping.jira_project_key,
+			)
 
-def process_issues(
-	jira_settings, user_list, jira_client, issues, jira_project_key, logs
-):
-	for issue in issues.get("issues", []):
-		process_issue(
-			issue,
-			jira_settings,
-			jira_project_key,
-			jira_client,
-			user_list,
-			jira_client.get_issue(issue.get("id")),
-			logs,
-		)
+	def process_issues(self, issues, jira_project_key):
+		for issue in issues.get("issues", []):
+			self.process_issue(
+				issue,
+				jira_project_key,
+				self.jira_client.get_issue(issue.get("id")),
+			)
 
-
-def process_issue(
-	issue, jira_settings, jira_project_key, jira_client, user_list, _issue, logs
-):
-	worklogs = jira_client.get_timelogs_by_issue(
-		issue.get("id"), started_after=jira_settings.last_synced_on
-	)
-
-	for worklog in worklogs.get("worklogs", []):
-		if worklog.get("author", {}).get("emailAddress", None) in user_list:
-			process_worklog(worklog, _issue, jira_settings, jira_project_key, logs)
-
-
-def process_worklog(worklog, _issue, jira_settings, jira_project_key, logs):
-	date = get_date_str(worklog.get("started"))
-	email_address = worklog.get("author", {}).get("emailAddress", None)
-
-	jira_user_account_id = worklog.get("author", {}).get("accountId", None)
-	worklog.update(
-		{
-			"_issueKey": _issue.get("key"),
-			"issueURL": f"{jira_settings.url}/browse/{_issue.get('key')}",
-			"issueDescription": _issue.get("fields", {}).get("summary"),
-		}
-	)
-
-	if not logs.get(date):
-		logs[date] = {}
-
-	key = f"{jira_project_key}::{email_address}::{jira_user_account_id}"
-
-	if not logs.get(date).get(
-		key,
-		None,
+	def process_issue(
+		self,
+		issue,
+		jira_project_key,
+		_issue,
 	):
-		logs[date][key] = []
+		worklogs = self.jira_client.get_timelogs_by_issue(
+			issue.get("id"), started_after=self.jira_settings.last_synced_on
+		)
 
-	logs[date][key].append(worklog)
+		for worklog in worklogs.get("worklogs", []):
+			if worklog.get("author", {}).get("emailAddress", None) in self.user_list:
+				self.process_worklog(worklog, _issue, jira_project_key)
+
+	def process_worklog(self, worklog, _issue, jira_project_key):
+		date = get_date_str(worklog.get("started"))
+		email_address = worklog.get("author", {}).get("emailAddress", None)
+
+		jira_user_account_id = worklog.get("author", {}).get("accountId", None)
+		worklog.update(
+			{
+				"_issueKey": _issue.get("key"),
+				"issueURL": f"{self.jira_settings.url}/browse/{_issue.get('key')}",
+				"issueDescription": _issue.get("fields", {}).get("summary"),
+			}
+		)
+
+		if not self.logs.get(date):
+			self.logs[date] = {}
+
+		key = f"{jira_project_key}::{email_address}::{jira_user_account_id}"
+
+		if not self.logs.get(date).get(
+			key,
+			None,
+		):
+			self.logs[date][key] = []
+
+		self.logs[date][key].append(worklog)
 
 
 def get_project_map(jira_settings):
