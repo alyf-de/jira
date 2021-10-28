@@ -29,7 +29,6 @@ class JiraWorkspace:
 			jira_settings.api_user,
 			jira_settings.get_password(fieldname="api_key"),
 		)
-		self.logs = {}
 		self.init_project_map()
 		self.init_user_costing()
 
@@ -50,67 +49,68 @@ class JiraWorkspace:
 
 	def sync_work_logs(self):
 		self.pull_issues()
+		self.pull_worklogs()
+		self.process_worklogs()
 		self.create_timesheets()
 
 	def pull_issues(self):
+		self.issues = {}
+
 		for mapping in self.jira_settings.mappings:
-			issues = self.jira_client.get_issues_for_project(mapping.jira_project_key)
-			self.process_issues(
-				issues,
-				mapping.jira_project_key,
-			)
+			key = mapping.jira_project_key
+			self.issues[key] = self.jira_client.get_issues_for_project(key)
 
-	def process_issues(self, issues, jira_project_key):
-		for issue in issues.get("issues", []):
-			self.process_issue(
-				issue,
-				jira_project_key,
-				self.jira_client.get_issue(issue.get("id")),
-			)
+	def pull_worklogs(self):
+		self.worklogs = {}
 
-	def process_issue(
-		self,
-		issue,
-		jira_project_key,
-		_issue,
-	):
-		worklogs = self.jira_client.get_timelogs_by_issue(
-			issue.get("id"), started_after=self.jira_settings.last_synced_on
-		)
+		for project_key, issues in self.issues.items():
+			for issue in issues.get("issues", []):
+				issue_id = issue.get("id")
+				key = f"{project_key}::{issue_id}"
+				self.worklogs[key] = self.jira_client.get_timelogs_by_issue(
+					issue_id, started_after=self.jira_settings.last_synced_on
+				)
 
-		for worklog in worklogs.get("worklogs", []):
-			if worklog.get("author", {}).get("emailAddress", None) in self.user_list:
-				self.process_worklog(worklog, _issue, jira_project_key)
+	def process_worklogs(self):
+		self.worklogs_processed = {}
 
-	def process_worklog(self, worklog, _issue, jira_project_key):
+		for key, worklogs in self.worklogs.items():
+			for worklog in worklogs.get("worklogs", []):
+				email = worklog.get("author", {}).get("emailAddress", None)
+
+				if email in self.user_list:
+					self.process_worklog(worklog, key)
+
+	def process_worklog(self, worklog, key):
+		project_key, issue_id = key.split("::")
+		issue = self.jira_client.get_issue(issue_id)
 		date = get_date_str(worklog.get("started"))
-		email_address = worklog.get("author", {}).get("emailAddress", None)
-
+		email = worklog.get("author", {}).get("emailAddress", None)
 		jira_user_account_id = worklog.get("author", {}).get("accountId", None)
+		key = f"{project_key}::{email}::{jira_user_account_id}"
+
 		worklog.update(
 			{
-				"_issueKey": _issue.get("key"),
-				"issueURL": f"{self.jira_settings.url}/browse/{_issue.get('key')}",
-				"issueDescription": _issue.get("fields", {}).get("summary"),
+				"_issueKey": issue.get("key"),
+				"issueURL": f"{self.jira_settings.url}/browse/{issue.get('key')}",
+				"issueDescription": issue.get("fields", {}).get("summary"),
 			}
 		)
 
-		if not self.logs.get(date):
-			self.logs[date] = {}
+		self.append_worklog(date, key, worklog)
 
-		key = f"{jira_project_key}::{email_address}::{jira_user_account_id}"
+	def append_worklog(self, date, key, worklog):
+		if not self.worklogs_processed.get(date):
+			self.worklogs_processed[date] = {}
 
-		if not self.logs.get(date).get(
-			key,
-			None,
-		):
-			self.logs[date][key] = []
+		if not self.worklogs_processed.get(date).get(key, None):
+			self.worklogs_processed[date][key] = []
 
-		self.logs[date][key].append(worklog)
+		self.worklogs_processed[date][key].append(worklog)
 
 	def create_timesheets(self):
-		for worklog_date in self.logs:
-			for worklog in self.logs[worklog_date]:
+		for worklog_date in self.worklogs_processed:
+			for worklog in self.worklogs_processed[worklog_date]:
 
 				project, user, jira_user_account_id = worklog.split("::")
 				employee = frappe.db.get_value("Employee", {"user_id": user})
@@ -123,7 +123,7 @@ class JiraWorkspace:
 				timesheet.parent_project = erpnext_project
 				timesheet.jira_user_account_id = jira_user_account_id
 
-				for log in self.logs[worklog_date][worklog]:
+				for log in self.worklogs_processed[worklog_date][worklog]:
 					base_billing_rate = (
 						flt(self.project_map.get(project, {}).get("billing_rate", 0))
 						* timesheet.exchange_rate
