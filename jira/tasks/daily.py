@@ -15,9 +15,7 @@ def pull_issues_from_jira(project=None):
 
 	for jira in frappe.get_all("Jira Settings", filters=filters):
 		jira_settings = frappe.get_doc("Jira Settings", jira.name)
-		workspace = JiraWorkspace(jira_settings)
-		workspace.pull_issues()
-		create_timesheets(jira_settings, workspace.logs)
+		JiraWorkspace(jira_settings).sync_work_logs()
 		jira_settings.last_synced_on = now_datetime()
 		jira_settings.save()
 
@@ -32,6 +30,27 @@ class JiraWorkspace:
 			jira_settings.get_password(fieldname="api_key"),
 		)
 		self.logs = {}
+		self.init_project_map()
+		self.init_user_costing()
+
+	def init_project_map(self):
+		self.project_map = {}
+
+		for project in self.jira_settings.mappings:
+			self.project_map[project.jira_project_key] = {
+				"erpnext_project": project.erpnext_project,
+				"billing_rate": project.billing_rate,
+			}
+
+	def init_user_costing(self):
+		self.user_cost_map = {}
+
+		for user in self.jira_settings.billing:
+			self.user_cost_map[user.email] = user.costing_rate
+
+	def sync_work_logs(self):
+		self.pull_issues()
+		self.create_timesheets()
 
 	def pull_issues(self):
 		for mapping in self.jira_settings.mappings:
@@ -89,101 +108,72 @@ class JiraWorkspace:
 
 		self.logs[date][key].append(worklog)
 
+	def create_timesheets(self):
+		for worklog_date in self.logs:
+			for worklog in self.logs[worklog_date]:
 
-def get_project_map(jira_settings):
-	project_map = {}
-
-	for project in jira_settings.mappings:
-		project_map[project.jira_project_key] = {
-			"erpnext_project": project.erpnext_project,
-			"billing_rate": project.billing_rate,
-		}
-
-	return project_map
-
-
-def get_user_costing(jira_settings):
-	user_cost_map = {}
-
-	for user in jira_settings.billing:
-		user_cost_map[user.email] = user.costing_rate
-
-	return user_cost_map
-
-
-def get_jira_client(jira_settings):
-	return JiraClient(
-		jira_settings.url,
-		jira_settings.api_user,
-		jira_settings.get_password(fieldname="api_key"),
-	)
-
-
-def create_timesheets(jira_settings, worklogs):
-	project_map = get_project_map(jira_settings)
-	user_cost_map = get_user_costing(jira_settings)
-
-	for worklog_date in worklogs:
-		for worklog in worklogs[worklog_date]:
-
-			project, user, jira_user_account_id = worklog.split("::")
-			employee = frappe.db.get_value("Employee", {"user_id": user})
-			erpnext_project = project_map.get(project, {}).get(
-				"erpnext_project", project
-			)
-
-			timesheet = frappe.new_doc("Timesheet")
-			timesheet.employee = employee
-			timesheet.parent_project = erpnext_project
-			timesheet.jira_user_account_id = jira_user_account_id
-
-			for log in worklogs[worklog_date][worklog]:
-				base_billing_rate = (
-					flt(project_map.get(project, {}).get("billing_rate", 0))
-					* timesheet.exchange_rate
-				)
-				base_costing_rate = (
-					flt(user_cost_map.get(user, 0)) * timesheet.exchange_rate
+				project, user, jira_user_account_id = worklog.split("::")
+				employee = frappe.db.get_value("Employee", {"user_id": user})
+				erpnext_project = self.project_map.get(project, {}).get(
+					"erpnext_project", project
 				)
 
-				billing_rate = project_map.get(project, {}).get("billing_rate", 0)
-				costing_rate = user_cost_map.get(user, 0)
+				timesheet = frappe.new_doc("Timesheet")
+				timesheet.employee = employee
+				timesheet.parent_project = erpnext_project
+				timesheet.jira_user_account_id = jira_user_account_id
 
-				billing_hours = log.get("timeSpentSeconds", 0) / 3600
+				for log in self.logs[worklog_date][worklog]:
+					base_billing_rate = (
+						flt(self.project_map.get(project, {}).get("billing_rate", 0))
+						* timesheet.exchange_rate
+					)
+					base_costing_rate = (
+						flt(self.user_cost_map.get(user, 0)) * timesheet.exchange_rate
+					)
 
-				description = f"{log.get('issueDescription')} ({log.get('_issueKey')})"
-				line_break = ":\n"
-				for comment in log.get("comment", {}).get("content", []):
-					if line_break not in description:
-						description += line_break
+					billing_rate = self.project_map.get(project, {}).get(
+						"billing_rate", 0
+					)
+					costing_rate = self.user_cost_map.get(user, 0)
 
-					for comm in comment.get("content", []):
-						description += comm.get("text", "") + " "
+					billing_hours = log.get("timeSpentSeconds", 0) / 3600
 
-				timesheet.append(
-					"time_logs",
-					{
-						"activity_type": jira_settings.activity_type,
-						"from_time": get_datetime_str(log.get("started")),
-						"hours": billing_hours,
-						"project": erpnext_project,
-						"is_billable": True,
-						"description": description,
-						"billing_hours": billing_hours,
-						"base_billing_rate": base_billing_rate,
-						"billing_rate": billing_rate,
-						"base_costing_rate": base_costing_rate,
-						"costing_rate": costing_rate,
-						"base_billing_amount": flt(billing_hours)
-						* flt(base_billing_rate),
-						"billing_amount": flt(billing_hours) * flt(billing_rate),
-						"costing_amount": flt(costing_rate) * flt(billing_hours),
-						"jira_issue": log.get("issueId"),
-						"jira_issue_url": log.get("issueURL"),
-						"jira_worklog": log.get("id"),
-					},
+					description = (
+						f"{log.get('issueDescription')} ({log.get('_issueKey')})"
+					)
+					line_break = ":\n"
+					for comment in log.get("comment", {}).get("content", []):
+						if line_break not in description:
+							description += line_break
+
+						for comm in comment.get("content", []):
+							description += comm.get("text", "") + " "
+
+					timesheet.append(
+						"time_logs",
+						{
+							"activity_type": self.jira_settings.activity_type,
+							"from_time": get_datetime_str(log.get("started")),
+							"hours": billing_hours,
+							"project": erpnext_project,
+							"is_billable": True,
+							"description": description,
+							"billing_hours": billing_hours,
+							"base_billing_rate": base_billing_rate,
+							"billing_rate": billing_rate,
+							"base_costing_rate": base_costing_rate,
+							"costing_rate": costing_rate,
+							"base_billing_amount": flt(billing_hours)
+							* flt(base_billing_rate),
+							"billing_amount": flt(billing_hours) * flt(billing_rate),
+							"costing_amount": flt(costing_rate) * flt(billing_hours),
+							"jira_issue": log.get("issueId"),
+							"jira_issue_url": log.get("issueURL"),
+							"jira_worklog": log.get("id"),
+						},
+					)
+
+				timesheet.insert(
+					ignore_mandatory=True, ignore_links=True, ignore_permissions=True
 				)
-
-			timesheet.insert(
-				ignore_mandatory=True, ignore_links=True, ignore_permissions=True
-			)
