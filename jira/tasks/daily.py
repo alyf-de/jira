@@ -7,7 +7,7 @@ from jira.jira_client import JiraClient
 
 
 @frappe.whitelist()
-def pull_issues_from_jira(project=None):
+def sync_work_logs_from_jira(project=None):
 	filters = {"enabled": 1}
 
 	if project:
@@ -29,10 +29,13 @@ class JiraWorkspace:
 			jira_settings.api_user,
 			jira_settings.get_password(fieldname="api_key"),
 		)
-		self.init_project_map()
-		self.init_user_costing()
+		self.issues = {}
+		self.worklogs = {}
+		self.worklogs_processed = {}
+		self._init_project_map()
+		self._init_user_costing()
 
-	def init_project_map(self):
+	def _init_project_map(self):
 		self.project_map = {}
 
 		for project in self.jira_settings.mappings:
@@ -41,7 +44,7 @@ class JiraWorkspace:
 				"billing_rate": project.billing_rate,
 			}
 
-	def init_user_costing(self):
+	def _init_user_costing(self):
 		self.user_cost_map = {}
 
 		for user in self.jira_settings.billing:
@@ -79,9 +82,9 @@ class JiraWorkspace:
 				email = worklog.get("author", {}).get("emailAddress", None)
 
 				if email in self.user_list:
-					self.process_worklog(worklog, key)
+					self._process_worklog(worklog, key)
 
-	def process_worklog(self, worklog, key):
+	def _process_worklog(self, worklog, key):
 		project_key, issue_id = key.split("::")
 		issue = self.jira_client.get_issue(issue_id)
 		date = get_date_str(worklog.get("started"))
@@ -97,9 +100,9 @@ class JiraWorkspace:
 			}
 		)
 
-		self.append_worklog(date, key, worklog)
+		self._append_worklog(date, key, worklog)
 
-	def append_worklog(self, date, key, worklog):
+	def _append_worklog(self, date, key, worklog):
 		if not self.worklogs_processed.get(date):
 			self.worklogs_processed[date] = {}
 
@@ -111,9 +114,9 @@ class JiraWorkspace:
 	def create_timesheets(self):
 		for date in self.worklogs_processed:
 			for worklog in self.worklogs_processed[date]:
-				self.create_timesheet(date, worklog)
+				self._create_timesheet(date, worklog)
 
-	def create_timesheet(self, date, worklog):
+	def _create_timesheet(self, date, worklog):
 		project, user, jira_user_account_id = worklog.split("::")
 		employee = frappe.db.get_value("Employee", {"user_id": user})
 		erpnext_project = self.project_map.get(project, {}).get(
@@ -128,13 +131,13 @@ class JiraWorkspace:
 		timesheet.jira_user_account_id = jira_user_account_id
 
 		for log in self.worklogs_processed[date][worklog]:
-			self.append_time_log(timesheet, log, billing_rate, costing_rate)
+			self._append_time_log(timesheet, log, billing_rate, costing_rate)
 
 		timesheet.insert(
 			ignore_mandatory=True, ignore_links=True, ignore_permissions=True
 		)
 
-	def append_time_log(self, timesheet, log, billing_rate, costing_rate):
+	def _append_time_log(self, timesheet, log, billing_rate, costing_rate):
 		base_billing_rate = flt(billing_rate) * timesheet.exchange_rate
 		base_costing_rate = flt(costing_rate) * timesheet.exchange_rate
 		billing_hours = log.get("timeSpentSeconds", 0) / 3600
