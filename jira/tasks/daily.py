@@ -141,7 +141,7 @@ class JiraWorkspace:
 		base_billing_rate = flt(billing_rate) * timesheet.exchange_rate
 		base_costing_rate = flt(costing_rate) * timesheet.exchange_rate
 		billing_hours = log.get("timeSpentSeconds", 0) / 3600
-		description = parse_description(log)
+		description = f"{log.get('issueDescription')} ({log.get('_issueKey')})\n{parse_description(log.get('comment'))}"
 
 		timesheet.append(
 			"time_logs",
@@ -167,15 +167,45 @@ class JiraWorkspace:
 		)
 
 
-def parse_description(log):
-	description = f"{log.get('issueDescription')} ({log.get('_issueKey')})"
-	line_break = ":\n"
+def parse_description(comments, type=[]):
+	"""
+	The structure of the comment content is as per the Atlassian Document Format (ADF)
+	https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/
 
-	for comment in log.get("comment", {}).get("content", []):
-		if line_break not in description:
-			description += line_break
+	To extract the text content, the function is run recursively to get the text
+	extracted from the nested dictionary.
 
-		for comm in comment.get("content", []):
-			description += comm.get("text", "") + " "
+	The list structure for bulletList, orderedList is preserved by adding a hyphen
+	to preserve the list structure.
+
+	The structure has a nested dict structure
+	https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/#json-structure
+
+
+	Parameters:
+	comments (dict, list): This is either the dict of the comment or just the content of the comment structure
+	type (list): This is used to check if the content is a part of bulletList, orderedList to add hyphen before rendering the text
+
+	Returns:
+	description (string): Parsed text comment from ADF fromat.
+	"""
+	if not comments:
+		return
+
+	description = ""
+
+	if isinstance(comments, dict):
+		comments = comments.get("content", [])
+
+	for content in comments:
+		if content.get("text"):
+			list_item = False
+			if set(type) & set(["bulletList", "orderedList"]):
+				list_item = True
+
+			description += f"\n{'- ' if list_item else ''}{content.get('text')}"
+		elif content.get("content"):
+			type.append(content.get("type"))
+			description += f"\n{parse_description(content.get('content'), type)}"
 
 	return description
