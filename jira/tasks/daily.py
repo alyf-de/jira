@@ -7,161 +7,175 @@ from jira.jira_client import JiraClient
 
 
 @frappe.whitelist()
-def pull_issues_from_jira(project=None):
-	"""
-	Creates a dictionary with date as key and corresponding logs
-	{
-		"date": {
-				"project_key + email_address + account_id": [worklogs]
-		}
-	}
-	"""
+def sync_work_logs_from_jira(project=None):
 	filters = {"enabled": 1}
+
 	if project:
-		filters.update({"name": project})
+		filters["name"] = project
 
 	for jira in frappe.get_all("Jira Settings", filters=filters):
 		jira_settings = frappe.get_doc("Jira Settings", jira.name)
-		user_list = [user.email for user in jira_settings.billing]
-		jira_client = JiraClient(
-			jira_settings.url,
-			jira_settings.api_user,
-			jira_settings.get_password(fieldname="api_key"),
-		)
-		logs = {}
-
-		for mapping in jira_settings.mappings:
-			issues = jira_client.get_issues_for_project(mapping.jira_project_key)
-
-			for issue in issues.get("issues", []):
-				_issue = jira_client.get_issue(issue.get("id"))
-				worklogs = jira_client.get_timelogs_by_issue(
-					issue.get("id"), started_after=jira_settings.last_synced_on
-				)
-
-				for worklog in worklogs.get("worklogs", []):
-					date = get_date_str(worklog.get("started"))
-					email_address = worklog.get("author", {}).get("emailAddress", None)
-					if email_address not in user_list:
-						continue
-
-					jira_user_account_id = worklog.get("author", {}).get(
-						"accountId", None
-					)
-					worklog.update(
-						{
-							"_issueKey": _issue.get("key"),
-							"issueURL": f"{jira_settings.url}/browse/{_issue.get('key')}",
-							"issueDescription": _issue.get("fields", {}).get("summary"),
-						}
-					)
-
-					if not logs.get(date):
-						logs[date] = {}
-
-					if not logs.get(date).get(
-						f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}",
-						None,
-					):
-						logs[date][
-							f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}"
-						] = []
-
-					logs[date][
-						f"{mapping.jira_project_key}::{email_address}::{jira_user_account_id}"
-					].append(worklog)
-
-		create_timesheets(jira_settings, logs)
+		JiraWorkspace(jira_settings).sync_work_logs()
 		jira_settings.last_synced_on = now_datetime()
 		jira_settings.save()
 
 
-def get_project_map(jira_settings):
-	project_map = {}
+class JiraWorkspace:
+	def __init__(self, jira_settings):
+		self.jira_settings = jira_settings
+		self.user_list = [user.email for user in self.jira_settings.billing]
+		self.jira_client = JiraClient(
+			jira_settings.url,
+			jira_settings.api_user,
+			jira_settings.get_password(fieldname="api_key"),
+		)
+		self.issues = {}
+		self.worklogs = {}
+		self.worklogs_processed = {}
+		self._init_project_map()
+		self._init_user_costing()
 
-	for project in jira_settings.mappings:
-		project_map[project.jira_project_key] = {
-			"erpnext_project": project.erpnext_project,
-			"billing_rate": project.billing_rate,
-		}
+	def _init_project_map(self):
+		self.project_map = {}
 
-	return project_map
+		for project in self.jira_settings.mappings:
+			self.project_map[project.jira_project_key] = {
+				"erpnext_project": project.erpnext_project,
+				"billing_rate": project.billing_rate,
+			}
 
+	def _init_user_costing(self):
+		self.user_cost_map = {}
 
-def get_user_costing(jira_settings):
-	user_cost_map = {}
+		for user in self.jira_settings.billing:
+			self.user_cost_map[user.email] = user.costing_rate
 
-	for user in jira_settings.billing:
-		user_cost_map[user.email] = user.costing_rate
+	def sync_work_logs(self):
+		self.pull_issues()
+		self.pull_worklogs()
+		self.process_worklogs()
+		self.create_timesheets()
 
-	return user_cost_map
+	def pull_issues(self):
+		self.issues = {}
 
+		for mapping in self.jira_settings.mappings:
+			key = mapping.jira_project_key
+			self.issues[key] = self.jira_client.get_issues_for_project(key)
 
-def create_timesheets(jira_settings, worklogs):
-	project_map = get_project_map(jira_settings)
-	user_cost_map = get_user_costing(jira_settings)
+	def pull_worklogs(self):
+		self.worklogs = {}
 
-	for worklog_date in worklogs:
-		for worklog in worklogs[worklog_date]:
-
-			project, user, jira_user_account_id = worklog.split("::")
-			employee = frappe.db.get_value("Employee", {"user_id": user})
-			erpnext_project = project_map.get(project, {}).get(
-				"erpnext_project", project
-			)
-
-			timesheet = frappe.new_doc("Timesheet")
-			timesheet.employee = employee
-			timesheet.parent_project = erpnext_project
-			timesheet.jira_user_account_id = jira_user_account_id
-
-			for log in worklogs[worklog_date][worklog]:
-				base_billing_rate = (
-					flt(project_map.get(project, {}).get("billing_rate", 0))
-					* timesheet.exchange_rate
-				)
-				base_costing_rate = (
-					flt(user_cost_map.get(user, 0)) * timesheet.exchange_rate
-				)
-
-				billing_rate = project_map.get(project, {}).get("billing_rate", 0)
-				costing_rate = user_cost_map.get(user, 0)
-
-				billing_hours = log.get("timeSpentSeconds", 0) / 3600
-
-				description = f"{log.get('issueDescription')} ({log.get('_issueKey')})"
-				line_break = ":\n"
-				for comment in log.get("comment", {}).get("content", []):
-					if line_break not in description:
-						description += line_break
-
-					for comm in comment.get("content", []):
-						description += comm.get("text", "") + " "
-
-				timesheet.append(
-					"time_logs",
-					{
-						"activity_type": jira_settings.activity_type,
-						"from_time": get_datetime_str(log.get("started")),
-						"hours": billing_hours,
-						"project": erpnext_project,
-						"is_billable": True,
-						"description": description,
-						"billing_hours": billing_hours,
-						"base_billing_rate": base_billing_rate,
-						"billing_rate": billing_rate,
-						"base_costing_rate": base_costing_rate,
-						"costing_rate": costing_rate,
-						"base_billing_amount": flt(billing_hours)
-						* flt(base_billing_rate),
-						"billing_amount": flt(billing_hours) * flt(billing_rate),
-						"costing_amount": flt(costing_rate) * flt(billing_hours),
-						"jira_issue": log.get("issueId"),
-						"jira_issue_url": log.get("issueURL"),
-						"jira_worklog": log.get("id"),
-					},
+		for project_key, issues in self.issues.items():
+			for issue in issues.get("issues", []):
+				issue_id = issue.get("id")
+				key = f"{project_key}::{issue_id}"
+				self.worklogs[key] = self.jira_client.get_timelogs_by_issue(
+					issue_id, started_after=self.jira_settings.last_synced_on
 				)
 
-			timesheet.insert(
-				ignore_mandatory=True, ignore_links=True, ignore_permissions=True
-			)
+	def process_worklogs(self):
+		self.worklogs_processed = {}
+
+		for key, worklogs in self.worklogs.items():
+			for worklog in worklogs.get("worklogs", []):
+				email = worklog.get("author", {}).get("emailAddress", None)
+
+				if email in self.user_list:
+					self._process_worklog(worklog, key)
+
+	def _process_worklog(self, worklog, key):
+		project_key, issue_id = key.split("::")
+		issue = self.jira_client.get_issue(issue_id)
+		date = get_date_str(worklog.get("started"))
+		email = worklog.get("author", {}).get("emailAddress", None)
+		jira_user_account_id = worklog.get("author", {}).get("accountId", None)
+		key = f"{project_key}::{email}::{jira_user_account_id}"
+
+		worklog.update(
+			{
+				"_issueKey": issue.get("key"),
+				"issueURL": f"{self.jira_settings.url}/browse/{issue.get('key')}",
+				"issueDescription": issue.get("fields", {}).get("summary"),
+			}
+		)
+
+		self._append_worklog(date, key, worklog)
+
+	def _append_worklog(self, date, key, worklog):
+		if not self.worklogs_processed.get(date):
+			self.worklogs_processed[date] = {}
+
+		if not self.worklogs_processed.get(date).get(key, None):
+			self.worklogs_processed[date][key] = []
+
+		self.worklogs_processed[date][key].append(worklog)
+
+	def create_timesheets(self):
+		for date in self.worklogs_processed:
+			for worklog in self.worklogs_processed[date]:
+				self._create_timesheet(date, worklog)
+
+	def _create_timesheet(self, date, worklog):
+		project, user, jira_user_account_id = worklog.split("::")
+		employee = frappe.db.get_value("Employee", {"user_id": user})
+		erpnext_project = self.project_map.get(project, {}).get(
+			"erpnext_project", project
+		)
+		billing_rate = self.project_map.get(project, {}).get("billing_rate", 0)
+		costing_rate = self.user_cost_map.get(user, 0)
+
+		timesheet = frappe.new_doc("Timesheet")
+		timesheet.employee = employee
+		timesheet.parent_project = erpnext_project
+		timesheet.jira_user_account_id = jira_user_account_id
+
+		for log in self.worklogs_processed[date][worklog]:
+			self._append_time_log(timesheet, log, billing_rate, costing_rate)
+
+		timesheet.insert(
+			ignore_mandatory=True, ignore_links=True, ignore_permissions=True
+		)
+
+	def _append_time_log(self, timesheet, log, billing_rate, costing_rate):
+		base_billing_rate = flt(billing_rate) * timesheet.exchange_rate
+		base_costing_rate = flt(costing_rate) * timesheet.exchange_rate
+		billing_hours = log.get("timeSpentSeconds", 0) / 3600
+		description = parse_description(log)
+
+		timesheet.append(
+			"time_logs",
+			{
+				"activity_type": self.jira_settings.activity_type,
+				"from_time": get_datetime_str(log.get("started")),
+				"hours": billing_hours,
+				"project": timesheet.parent_project,
+				"is_billable": True,
+				"description": description,
+				"billing_hours": billing_hours,
+				"base_billing_rate": base_billing_rate,
+				"billing_rate": billing_rate,
+				"base_costing_rate": base_costing_rate,
+				"costing_rate": costing_rate,
+				"base_billing_amount": flt(billing_hours) * flt(base_billing_rate),
+				"billing_amount": flt(billing_hours) * flt(billing_rate),
+				"costing_amount": flt(costing_rate) * flt(billing_hours),
+				"jira_issue": log.get("issueId"),
+				"jira_issue_url": log.get("issueURL"),
+				"jira_worklog": log.get("id"),
+			},
+		)
+
+
+def parse_description(log):
+	description = f"{log.get('issueDescription')} ({log.get('_issueKey')})"
+	line_break = ":\n"
+
+	for comment in log.get("comment", {}).get("content", []):
+		if line_break not in description:
+			description += line_break
+
+		for comm in comment.get("content", []):
+			description += comm.get("text", "") + " "
+
+	return description
