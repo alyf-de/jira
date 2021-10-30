@@ -141,7 +141,11 @@ class JiraWorkspace:
 		base_billing_rate = flt(billing_rate) * timesheet.exchange_rate
 		base_costing_rate = flt(costing_rate) * timesheet.exchange_rate
 		billing_hours = log.get("timeSpentSeconds", 0) / 3600
-		description = f"{log.get('issueDescription')} ({log.get('_issueKey')})\n{parse_description(log.get('comment'))}"
+		description = f"{log.get('issueDescription')} ({log.get('_issueKey')})"
+		comments = parse_comments(log.get("comment"))
+
+		if comments:
+			description += f":\n{comments}"
 
 		timesheet.append(
 			"time_logs",
@@ -167,7 +171,7 @@ class JiraWorkspace:
 		)
 
 
-def parse_description(comments, type=[]):
+def parse_comments(comments, part_of_list=False):
 	"""
 	The structure of the comment content is as per the Atlassian Document Format (ADF)
 	https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/
@@ -181,10 +185,9 @@ def parse_description(comments, type=[]):
 	The structure has a nested dict structure
 	https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/#json-structure
 
-
 	Parameters:
 	comments (dict, list): This is either the dict of the comment or just the content of the comment structure
-	type (list): This is used to check if the content is a part of bulletList, orderedList to add hyphen before rendering the text
+	part_of_list (bool): This is used to check if the content is a part of bulletList, orderedList to add hyphen before rendering the text
 
 	Returns:
 	description (string): Parsed text comment from ADF fromat.
@@ -199,13 +202,16 @@ def parse_description(comments, type=[]):
 
 	for content in comments:
 		if content.get("text"):
-			list_item = False
-			if set(type) & set(["bulletList", "orderedList"]):
-				list_item = True
-
-			description += f"\n{'- ' if list_item else ''}{content.get('text')}"
+			description += f"\n{'- ' if part_of_list else ''}{content.get('text')}"
 		elif content.get("content"):
-			type.append(content.get("type"))
-			description += f"\n{parse_description(content.get('content'), type)}"
+			list_item = content.get("type") in [
+				"bulletList",
+				"orderedList",
+			]
+			description += parse_comments(
+				content.get("content"), part_of_list or list_item
+			)
+		else:
+			description += "\n"
 
 	return description
