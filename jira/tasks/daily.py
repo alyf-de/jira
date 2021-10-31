@@ -171,7 +171,7 @@ class JiraWorkspace:
 		)
 
 
-def parse_comments(comments, part_of_list=False):
+def parse_comments(comments, list_indent=None):
 	"""
 	The structure of the comment content is as per the Atlassian Document Format (ADF)
 	https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/
@@ -187,13 +187,16 @@ def parse_comments(comments, part_of_list=False):
 
 	Parameters:
 	comments (dict, list): This is either the dict of the comment or just the content of the comment structure
-	part_of_list (bool): This is used to check if the content is a part of bulletList, orderedList to add hyphen before rendering the text
+	list_indent (int): This is used to indent the content if the text is a part of bulletList, orderedList and to add hyphen before rendering the text
 
 	Returns:
 	description (string): Parsed text comment from ADF fromat.
 	"""
 	if not comments:
 		return
+
+	if not list_indent:
+		list_indent = 0
 
 	description = ""
 
@@ -202,15 +205,14 @@ def parse_comments(comments, part_of_list=False):
 
 	for content in comments:
 		if content.get("text"):
-			description += f"\n{'- ' if part_of_list else ''}{content.get('text')}"
+			# if list starts, the list_index will be set to 1, but while rendering, we do not want the indent
+			# to be visible, hence substracting 1 will give us the correct indent while displaying
+			description += f"\n{(list_indent - 1) * '	' if list_indent else ''}{'- ' if list_indent else ''}{content.get('text')}"
 		elif content.get("content"):
-			list_item = content.get("type") in [
-				"bulletList",
-				"orderedList",
-			]
-			description += parse_comments(
-				content.get("content"), part_of_list or list_item
-			)
+			if content.get("type") in ["bulletList", "orderedList"]:
+				list_indent += 1
+
+			description += parse_comments(content.get("content"), list_indent)
 		else:
 			description += "\n"
 
