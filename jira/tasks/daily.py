@@ -138,7 +138,7 @@ class JiraWorkspace:
 		billing_rate = self.project_map.get(project, {}).get("billing_rate", 0)
 		costing_rate = self.user_cost_map.get(user, 0)
 
-		timesheet = _get_timesheet(employee, date)
+		timesheet = _get_timesheet(jira_user_account_id, date)
 		timesheet.employee = employee
 		timesheet.parent_project = erpnext_project
 		timesheet.jira_user_account_id = jira_user_account_id
@@ -198,12 +198,12 @@ class JiraWorkspace:
 		if not _worklog_exists:
 			timesheet.append("time_logs", _log)
 
-def _get_timesheet(employee, date):
+def _get_timesheet(jira_user_account_id, date):
 	"""
 	Checks for the timesheet based off the employee and date and the docstatus
 	If timesheet exists and it is still in draft state, it'll return the timesheet else will return a new timesheet doc
 	"""
-	_timesheet = frappe.db.exists({"doctype": "Timesheet", "employee": employee, "start_date": date, "docstatus": 0})
+	_timesheet = frappe.db.exists({"doctype": "Timesheet", "jira_user_account_id": jira_user_account_id, "start_date": date, "docstatus": 0})
 
 	if _timesheet:
 		return frappe.get_doc("Timesheet", _timesheet[0][0])
