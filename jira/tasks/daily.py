@@ -138,7 +138,7 @@ class JiraWorkspace:
 		billing_rate = self.project_map.get(project, {}).get("billing_rate", 0)
 		costing_rate = self.user_cost_map.get(user, 0)
 
-		timesheet = _get_timesheet(jira_user_account_id, date)
+		timesheet = _get_timesheet(jira_user_account_id, date, erpnext_project)
 		timesheet.employee = employee
 		timesheet.parent_project = erpnext_project
 		timesheet.jira_user_account_id = jira_user_account_id
@@ -203,7 +203,7 @@ class JiraWorkspace:
 			timesheet.append("time_logs", _log)
 
 
-def _get_timesheet(jira_user_account_id, date):
+def _get_timesheet(jira_user_account_id, date, erpnext_project):
 	"""
 	Checks for the timesheet based off the employee and date and the docstatus
 	If timesheet exists and it is still in draft state, it'll return the timesheet else will return a new timesheet doc
@@ -213,6 +213,7 @@ def _get_timesheet(jira_user_account_id, date):
 			"doctype": "Timesheet",
 			"jira_user_account_id": jira_user_account_id,
 			"start_date": date,
+			"parent_project": erpnext_project,
 			"docstatus": 0,
 		}
 	)
