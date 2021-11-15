@@ -54,7 +54,7 @@ class JiraWorkspace:
 		self.pull_issues()
 		self.pull_worklogs()
 		self.process_worklogs()
-		self.create_timesheets()
+		self.create_or_update_timesheets()
 
 	def pull_issues(self):
 		self.issues = {}
@@ -65,13 +65,19 @@ class JiraWorkspace:
 
 	def pull_worklogs(self):
 		self.worklogs = {}
+		# TODO
+		# Enable startAfter for syncing the JIRA issues
+		# started_after = None
+		#
+		# if self.jira_settings.sync_last and self.jira_settings.last_synced_on:
+		#	started_after = add_days(self.jira_settings.last_synced_on, -1 * self.jira_settings.sync_last)
 
 		for project_key, issues in self.issues.items():
 			for issue in issues.get("issues", []):
 				issue_id = issue.get("id")
 				key = f"{project_key}::{issue_id}"
 				self.worklogs[key] = self.jira_client.get_timelogs_by_issue(
-					issue_id, started_after=self.jira_settings.last_synced_on
+					issue_id =issue_id
 				)
 
 	def process_worklogs(self):
@@ -111,12 +117,19 @@ class JiraWorkspace:
 
 		self.worklogs_processed[date][key].append(worklog)
 
-	def create_timesheets(self):
+	def create_or_update_timesheets(self):
 		for date in self.worklogs_processed:
 			for worklog in self.worklogs_processed[date]:
-				self._create_timesheet(date, worklog)
+				self._create_or_update_timesheet(date, worklog)
 
-	def _create_timesheet(self, date, worklog):
+	def _create_or_update_timesheet(self, date, worklog):
+		"""
+		Handles multiple scenarios
+		- If timesheet log exists for a worklog, the timesheet log is updated if the timesheet is not submitted
+		- If new worklog is fetched, and if timesheet is submitted, it creates a new timesheet for the same date
+		- If new worklog is fetched, and if timesheet is not submitted, it'll append it to timesheet logs
+		- If timesheet is submitted, doesnt update the timesheet log
+		"""
 		project, user, jira_user_account_id = worklog.split("::")
 		employee = frappe.db.get_value("Employee", {"user_id": user})
 		erpnext_project = self.project_map.get(project, {}).get(
@@ -125,19 +138,26 @@ class JiraWorkspace:
 		billing_rate = self.project_map.get(project, {}).get("billing_rate", 0)
 		costing_rate = self.user_cost_map.get(user, 0)
 
-		timesheet = frappe.new_doc("Timesheet")
+		timesheet = _get_timesheet(jira_user_account_id, date)
 		timesheet.employee = employee
 		timesheet.parent_project = erpnext_project
 		timesheet.jira_user_account_id = jira_user_account_id
+		timesheet.start_date = date
 
 		for log in self.worklogs_processed[date][worklog]:
-			self._append_time_log(timesheet, log, billing_rate, costing_rate)
+			self._append_or_update_time_log(timesheet, log, billing_rate, costing_rate)
 
-		timesheet.insert(
-			ignore_mandatory=True, ignore_links=True, ignore_permissions=True
-		)
+		if timesheet.get("time_logs"):
+			timesheet.flags.ignore_mandatory = True
+			timesheet.flags.ignore_links = True
+			timesheet.flags.ignore_permissions = True
+			timesheet.save()
 
-	def _append_time_log(self, timesheet, log, billing_rate, costing_rate):
+	def _append_or_update_time_log(self, timesheet, log, billing_rate, costing_rate):
+		"""
+		Updates the existing timesheet log if already present in Timesheet, if not, adds a new
+		log in Timesheet.
+		"""
 		base_billing_rate = flt(billing_rate) * timesheet.exchange_rate
 		base_costing_rate = flt(costing_rate) * timesheet.exchange_rate
 		billing_hours = log.get("timeSpentSeconds", 0) / 3600
@@ -147,29 +167,48 @@ class JiraWorkspace:
 		if comments:
 			description += f":\n{comments}"
 
-		timesheet.append(
-			"time_logs",
-			{
-				"activity_type": self.jira_settings.activity_type,
-				"from_time": get_datetime_str(log.get("started")),
-				"hours": billing_hours,
-				"project": timesheet.parent_project,
-				"is_billable": True,
-				"description": description,
-				"billing_hours": billing_hours,
-				"base_billing_rate": base_billing_rate,
-				"billing_rate": billing_rate,
-				"base_costing_rate": base_costing_rate,
-				"costing_rate": costing_rate,
-				"base_billing_amount": flt(billing_hours) * flt(base_billing_rate),
-				"billing_amount": flt(billing_hours) * flt(billing_rate),
-				"costing_amount": flt(costing_rate) * flt(billing_hours),
-				"jira_issue": log.get("issueId"),
-				"jira_issue_url": log.get("issueURL"),
-				"jira_worklog": log.get("id"),
-			},
-		)
+		_log = {
+			"activity_type": self.jira_settings.activity_type,
+			"from_time": get_datetime_str(log.get("started")),
+			"hours": billing_hours,
+			"project": timesheet.parent_project,
+			"is_billable": True,
+			"description": description,
+			"billing_hours": billing_hours,
+			"base_billing_rate": base_billing_rate,
+			"billing_rate": billing_rate,
+			"base_costing_rate": base_costing_rate,
+			"costing_rate": costing_rate,
+			"base_billing_amount": flt(billing_hours) * flt(base_billing_rate),
+			"billing_amount": flt(billing_hours) * flt(billing_rate),
+			"costing_amount": flt(costing_rate) * flt(billing_hours),
+			"jira_issue": log.get("issueId"),
+			"jira_issue_url": log.get("issueURL"),
+			"jira_worklog": log.get("id"),
+		}
 
+		# Check if a worklog exists in the current timesheet document and updates it
+		_worklog_exists = timesheet.get(key="time_logs", filters={"jira_worklog": log.get("id")})
+		if _worklog_exists:
+			_worklog_exists[0].update(_log)
+			return
+
+		# Check if a worklog exists in all the timesheets and if not, inserts it.
+		_worklog_exists = frappe.db.exists({"doctype": "Timesheet Detail", "jira_worklog": log.get("id")})
+		if not _worklog_exists:
+			timesheet.append("time_logs", _log)
+
+def _get_timesheet(jira_user_account_id, date):
+	"""
+	Checks for the timesheet based off the employee and date and the docstatus
+	If timesheet exists and it is still in draft state, it'll return the timesheet else will return a new timesheet doc
+	"""
+	_timesheet = frappe.db.exists({"doctype": "Timesheet", "jira_user_account_id": jira_user_account_id, "start_date": date, "docstatus": 0})
+
+	if _timesheet:
+		return frappe.get_doc("Timesheet", _timesheet[0][0])
+
+	return frappe.new_doc("Timesheet")
 
 def parse_comments(comments, list_indent=None):
 	"""
