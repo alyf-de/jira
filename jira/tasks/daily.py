@@ -77,7 +77,7 @@ class JiraWorkspace:
 				issue_id = issue.get("id")
 				key = f"{project_key}::{issue_id}"
 				self.worklogs[key] = self.jira_client.get_timelogs_by_issue(
-					issue_id =issue_id
+					issue_id=issue_id
 				)
 
 	def process_worklogs(self):
@@ -188,27 +188,40 @@ class JiraWorkspace:
 		}
 
 		# Check if a worklog exists in the current timesheet document and updates it
-		_worklog_exists = timesheet.get(key="time_logs", filters={"jira_worklog": log.get("id")})
+		_worklog_exists = timesheet.get(
+			key="time_logs", filters={"jira_worklog": log.get("id")}
+		)
 		if _worklog_exists:
 			_worklog_exists[0].update(_log)
 			return
 
 		# Check if a worklog exists in all the timesheets and if not, inserts it.
-		_worklog_exists = frappe.db.exists({"doctype": "Timesheet Detail", "jira_worklog": log.get("id")})
+		_worklog_exists = frappe.db.exists(
+			{"doctype": "Timesheet Detail", "jira_worklog": log.get("id")}
+		)
 		if not _worklog_exists:
 			timesheet.append("time_logs", _log)
+
 
 def _get_timesheet(jira_user_account_id, date):
 	"""
 	Checks for the timesheet based off the employee and date and the docstatus
 	If timesheet exists and it is still in draft state, it'll return the timesheet else will return a new timesheet doc
 	"""
-	_timesheet = frappe.db.exists({"doctype": "Timesheet", "jira_user_account_id": jira_user_account_id, "start_date": date, "docstatus": 0})
+	_timesheet = frappe.db.exists(
+		{
+			"doctype": "Timesheet",
+			"jira_user_account_id": jira_user_account_id,
+			"start_date": date,
+			"docstatus": 0,
+		}
+	)
 
 	if _timesheet:
 		return frappe.get_doc("Timesheet", _timesheet[0][0])
 
 	return frappe.new_doc("Timesheet")
+
 
 def parse_comments(comments, list_indent=None):
 	"""
