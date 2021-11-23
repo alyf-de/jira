@@ -32,6 +32,7 @@ class JiraWorkspace:
 		self.issues = {}
 		self.worklogs = {}
 		self.worklogs_processed = {}
+		self.jira_id_map = {}
 		self._init_project_map()
 		self._init_user_costing()
 
@@ -51,53 +52,61 @@ class JiraWorkspace:
 			self.user_cost_map[user.email] = user.costing_rate
 
 	def sync_work_logs(self):
-		self.pull_issues()
-		self.pull_worklogs()
-		self.process_worklogs()
+		self.pull_issues_and_worklogs()
 		self.create_or_update_timesheets()
 
-	def pull_issues(self):
-		self.issues = {}
+	def pull_issues_and_worklogs(self):
+		"""
+		Syncs Issues and worklogs and creates a dict
+
+		self.issues = {
+			project: {
+				issueId: {
+					user : {
+						date: [
+							worklog 1,
+							worklog 2
+						]
+					}
+				}
+			}
+		}
+		"""
 
 		for mapping in self.jira_settings.mappings:
-			key = mapping.jira_project_key
-			self.issues[key] = self.jira_client.get_issues_for_project(key)
+			project = mapping.jira_project_key
 
-	def pull_worklogs(self):
-		self.worklogs = {}
-		# TODO
-		# Enable startAfter for syncing the JIRA issues
-		# started_after = None
-		#
-		# if self.jira_settings.sync_last and self.jira_settings.last_synced_on:
-		#	started_after = add_days(self.jira_settings.last_synced_on, -1 * self.jira_settings.sync_last)
+			if not self.project_exists(project):
+				self.create_project(project)
 
-		for project_key, issues in self.issues.items():
-			for issue in issues.get("issues", []):
-				issue_id = issue.get("id")
-				key = f"{project_key}::{issue_id}"
-				self.worklogs[key] = self.jira_client.get_timelogs_by_issue(
-					issue_id=issue_id
-				)
+			self._sync_issues(project)
 
-	def process_worklogs(self):
-		self.worklogs_processed = {}
+	def _sync_issues(self, project):
+		for issue in self.jira_client.get_issues_for_project(project):
+			if not self.issue_exists(project, issue.get("id")):
+				self.create_issue(project, issue)
 
-		for key, worklogs in self.worklogs.items():
-			for worklog in worklogs.get("worklogs", []):
-				email = worklog.get("author", {}).get("emailAddress", None)
+			self._sync_worklogs(project, issue)
 
-				if email in self.user_list:
-					self._process_worklog(worklog, key)
+	def _sync_worklogs(self, project, issue):
+		for worklog in self.pull_worklogs(issue.get("id")):
+			email = worklog.get("author", {}).get("emailAddress", None)
+			worklog_date = get_date_str(worklog.get("started"))
 
-	def _process_worklog(self, worklog, key):
-		project_key, issue_id = key.split("::")
-		issue = self.jira_client.get_issue(issue_id)
-		date = get_date_str(worklog.get("started"))
-		email = worklog.get("author", {}).get("emailAddress", None)
-		jira_user_account_id = worklog.get("author", {}).get("accountId", None)
-		key = f"{project_key}::{email}::{jira_user_account_id}"
+			self._add_jira_id(email, worklog)
+			self._check_if_user_log_exists(project, issue, email)
+			self._check_if_worklog_date_exists(project, issue, email, worklog_date)
+			self._add_worklog_to_date(worklog, issue, project, email, worklog_date)
 
+	def _check_if_user_log_exists(self, project, issue, email):
+		if not self.user_log_exists(project, issue.get("id"), email):
+			self.create_user_log(project, issue.get("id"), email)
+
+	def _check_if_worklog_date_exists(self, project, issue, email, worklog_date):
+		if not self.worklog_date_exists(project, issue.get("id"), email, worklog_date):
+			self.create_worklog_date(project, issue.get("id"), email, worklog_date)
+
+	def _add_worklog_to_date(self, worklog, issue, project, email, worklog_date):
 		worklog.update(
 			{
 				"_issueKey": issue.get("key"),
@@ -106,23 +115,77 @@ class JiraWorkspace:
 			}
 		)
 
-		self._append_worklog(date, key, worklog)
+		self.add_worklog(project, issue.get("id"), email, worklog_date, worklog)
 
-	def _append_worklog(self, date, key, worklog):
-		if not self.worklogs_processed.get(date):
-			self.worklogs_processed[date] = {}
+	def _add_jira_id(self, email, worklog):
+		self.jira_id_map.update(
+			{email: worklog.get("author", {}).get("accountId", None)}
+		)
 
-		if not self.worklogs_processed.get(date).get(key, None):
-			self.worklogs_processed[date][key] = []
+	def project_exists(self, project):
+		return self.issues.get(project)
 
-		self.worklogs_processed[date][key].append(worklog)
+	def create_project(self, project):
+		self.issues.update({project: {}})
+
+	def issue_exists(self, project, issue):
+		return self.issues.get(project, {}).get(issue)
+
+	def create_issue(self, project, issue):
+		self.issues.get(project, {}).update(
+			{
+				issue.get("id"): {
+					"id": issue.get("id"),
+					"summary": issue.get("summary"),
+					"worklogs": {},
+				}
+			}
+		)
+
+	def user_log_exists(self, project, issue, email):
+		return (
+			self.issues.get(project, {}).get(issue, {}).get("worklogs", {}).get(email)
+		)
+
+	def create_user_log(self, project, issue, email):
+		self.issues.get(project, {}).get(issue, {}).get("worklogs", {}).update(
+			{email: {}}
+		)
+
+	def worklog_date_exists(self, project, issue, email, date):
+		return (
+			self.issues.get(project, {})
+			.get(issue, {})
+			.get("worklogs", {})
+			.get(email, {})
+			.get(date, None)
+		)
+
+	def create_worklog_date(self, project, issue, email, date):
+		self.issues.get(project, {}).get(issue, {}).get("worklogs", {}).get(
+			email, {}
+		).update({date: []})
+
+	def add_worklog(self, project, issue, email, date, worklog):
+		self.issues.get(project, {}).get(issue, {}).get("worklogs", {}).get(
+			email, {}
+		).get(date, []).append(worklog)
+
+	def pull_worklogs(self, issue):
+		worklogs = self.jira_client.get_timelogs_by_issue(issue_id=issue)
+		return worklogs.get("worklogs")
 
 	def create_or_update_timesheets(self):
-		for date in self.worklogs_processed:
-			for worklog in self.worklogs_processed[date]:
-				self._create_or_update_timesheet(date, worklog)
+		for project_name, projects in self.issues.items():
+			for issues in projects.values():
+				for user, worklogs in issues.get("worklogs").items():
+					if not user in self.user_list:
+						continue
 
-	def _create_or_update_timesheet(self, date, worklog):
+					for date, logs in worklogs.items():
+						self._create_or_update_timesheet(project_name, user, date, logs)
+
+	def _create_or_update_timesheet(self, project, user, date, logs):
 		"""
 		Handles multiple scenarios
 		- If timesheet log exists for a worklog, the timesheet log is updated if the timesheet is not submitted
@@ -130,7 +193,7 @@ class JiraWorkspace:
 		- If new worklog is fetched, and if timesheet is not submitted, it'll append it to timesheet logs
 		- If timesheet is submitted, doesnt update the timesheet log
 		"""
-		project, user, jira_user_account_id = worklog.split("::")
+		jira_user_account_id = self.jira_id_map.get(user, None)
 		employee = frappe.db.get_value("Employee", {"user_id": user})
 		erpnext_project = self.project_map.get(project, {}).get(
 			"erpnext_project", project
@@ -144,7 +207,7 @@ class JiraWorkspace:
 		timesheet.jira_user_account_id = jira_user_account_id
 		timesheet.start_date = date
 
-		for log in self.worklogs_processed[date][worklog]:
+		for log in logs:
 			self._append_or_update_time_log(timesheet, log, billing_rate, costing_rate)
 
 		if timesheet.get("time_logs"):
