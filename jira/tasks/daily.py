@@ -2,7 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe.utils import now_datetime, get_datetime_str, flt, get_date_str
+from frappe.utils import now_datetime, get_datetime_str, get_date_str, flt
 from jira.jira_client import JiraClient
 
 
@@ -31,8 +31,6 @@ class JiraWorkspace:
 		)
 		self.issues = {}
 		self.worklogs = {}
-		self.worklogs_processed = {}
-		self.jira_id_map = {}
 		self._init_project_map()
 		self._init_user_costing()
 
@@ -52,239 +50,132 @@ class JiraWorkspace:
 			self.user_cost_map[user.email] = user.costing_rate
 
 	def sync_work_logs(self):
-		self.pull_issues_and_worklogs()
-		self.create_or_update_timesheets()
+		self.pull_issues()
+		self.pull_worklogs()
+		self.process_worklogs()
 
-	def pull_issues_and_worklogs(self):
-		"""
-		Syncs Issues and worklogs and creates a dict
-
-		self.issues = {
-			project: {
-				issueId: {
-					user : {
-						date: [
-							worklog 1,
-							worklog 2
-						]
-					}
-				}
-			}
-		}
-		"""
-
+	def pull_issues(self):
 		for mapping in self.jira_settings.mappings:
-			project = mapping.jira_project_key
+			project_key = mapping.jira_project_key
 
-			if not self.project_exists(project):
-				self.create_project(project)
-
-			self._sync_issues(project)
-
-	def _sync_issues(self, project):
-		for issue in self.jira_client.get_issues_for_project(project):
-			if not self.issue_exists(project, issue.get("id")):
-				self.create_issue(project, issue)
-
-			self._sync_worklogs(project, issue)
-
-	def _sync_worklogs(self, project, issue):
-		for worklog in self.pull_worklogs(issue.get("id")):
-			email = worklog.get("author", {}).get("emailAddress", None)
-			worklog_date = get_date_str(worklog.get("started"))
-
-			self._add_jira_id(email, worklog)
-			self._check_if_user_log_exists(project, issue, email)
-			self._check_if_worklog_date_exists(project, issue, email, worklog_date)
-			self._add_worklog_to_date(worklog, issue, project, email, worklog_date)
-
-	def _check_if_user_log_exists(self, project, issue, email):
-		if not self.user_log_exists(project, issue.get("id"), email):
-			self.create_user_log(project, issue.get("id"), email)
-
-	def _check_if_worklog_date_exists(self, project, issue, email, worklog_date):
-		if not self.worklog_date_exists(project, issue.get("id"), email, worklog_date):
-			self.create_worklog_date(project, issue.get("id"), email, worklog_date)
-
-	def _add_worklog_to_date(self, worklog, issue, project, email, worklog_date):
-		worklog.update(
-			{
-				"_issueKey": issue.get("key"),
-				"issueURL": f"{self.jira_settings.url}/browse/{issue.get('key')}",
-				"issueDescription": issue.get("fields", {}).get("summary"),
-			}
-		)
-
-		self.add_worklog(project, issue.get("id"), email, worklog_date, worklog)
-
-	def _add_jira_id(self, email, worklog):
-		self.jira_id_map.update(
-			{email: worklog.get("author", {}).get("accountId", None)}
-		)
-
-	def project_exists(self, project):
-		return self.issues.get(project)
-
-	def create_project(self, project):
-		self.issues.update({project: {}})
-
-	def issue_exists(self, project, issue):
-		return self.issues.get(project, {}).get(issue)
-
-	def create_issue(self, project, issue):
-		self.issues.get(project, {}).update(
-			{
-				issue.get("id"): {
-					"id": issue.get("id"),
-					"summary": issue.get("summary"),
-					"worklogs": {},
+			for issue in self.jira_client.get_issues_for_project(project_key):
+				self.issues[issue.get("id")] = {
+					"project_key": project_key,
+					"issue_key": issue.get("key"),
+					"summary": issue.get("fields", {}).get("summary"),
 				}
+
+	def pull_worklogs(self):
+		for issue_id in self.issues.keys():
+			for worklog in self.jira_client.get_timelogs_by_issue(issue_id).get(
+				"worklogs"
+			):
+				self.worklogs[worklog.get("id")] = {
+					"jira_issue": issue_id,
+					"jira_issue_url": f"{self.jira_settings.url}/browse/{self.issues[issue_id].get('issue_key')}",
+					"account_id": worklog.get("author", {}).get("accountId"),
+					"email": worklog.get("author", {}).get("emailAddress", None),
+					"from_time": get_datetime_str(worklog.get("started")),
+					"time_spend_seconds": worklog.get("timeSpentSeconds"),
+					"comment": parse_comments(worklog.get("comment")),
+				}
+
+	def process_worklogs(self):
+		for worklog_id, worklog in self.worklogs.items():
+			if not worklog.get("email") in self.user_list:
+				continue
+
+			timesheet = self.get_timesheet(worklog_id, worklog)
+
+			if timesheet.docstatus != 0:
+				continue
+
+			issue = self.issues[worklog.get("jira_issue")]
+			billing_rate = self.project_map.get(issue.get("project_key"), {}).get(
+				"billing_rate", 0
+			)
+			costing_rate = self.user_cost_map.get(worklog.get("email"), 0)
+			billing_hours = worklog.get("time_spend_seconds", 0) / 3600
+			description = f"{issue.get('summary')} ({issue.get('issue_key')})"
+
+			if worklog.get("comment"):
+				description += f":\n{worklog.get('comment')}"
+
+			log = {
+				"activity_type": self.jira_settings.activity_type,
+				"from_time": get_datetime_str(worklog.get("from_time")),
+				"hours": billing_hours,
+				"project": timesheet.parent_project,
+				"is_billable": True,
+				"description": description,
+				"billing_hours": billing_hours,
+				"base_billing_rate": billing_rate,
+				"billing_rate": billing_rate,
+				"costing_rate": costing_rate,
+				"base_costing_rate": costing_rate,
+				"billing_amount": flt(billing_hours) * flt(billing_rate),
+				"base_billing_amount": flt(billing_hours) * flt(billing_rate),
+				"costing_amount": flt(billing_hours) * flt(costing_rate),
+				"base_costing_amount": flt(billing_hours) * flt(costing_rate),
+				"jira_issue": worklog.get("jira_issue"),
+				"jira_issue_url": worklog.get("jira_issue_url"),
+				"jira_worklog": worklog_id,
 			}
-		)
 
-	def user_log_exists(self, project, issue, email):
-		return (
-			self.issues.get(project, {}).get(issue, {}).get("worklogs", {}).get(email)
-		)
+			worklog_exists = timesheet.get(
+				key="time_logs", filters={"jira_worklog": worklog_id}
+			)
 
-	def create_user_log(self, project, issue, email):
-		self.issues.get(project, {}).get(issue, {}).get("worklogs", {}).update(
-			{email: {}}
-		)
+			if worklog_exists:
+				worklog_exists[0].update(log)
+			else:
+				timesheet.append("time_logs", log)
 
-	def worklog_date_exists(self, project, issue, email, date):
-		return (
-			self.issues.get(project, {})
-			.get(issue, {})
-			.get("worklogs", {})
-			.get(email, {})
-			.get(date, None)
-		)
-
-	def create_worklog_date(self, project, issue, email, date):
-		self.issues.get(project, {}).get(issue, {}).get("worklogs", {}).get(
-			email, {}
-		).update({date: []})
-
-	def add_worklog(self, project, issue, email, date, worklog):
-		self.issues.get(project, {}).get(issue, {}).get("worklogs", {}).get(
-			email, {}
-		).get(date, []).append(worklog)
-
-	def pull_worklogs(self, issue):
-		worklogs = self.jira_client.get_timelogs_by_issue(issue_id=issue)
-		return worklogs.get("worklogs")
-
-	def create_or_update_timesheets(self):
-		for project_name, projects in self.issues.items():
-			for issues in projects.values():
-				for user, worklogs in issues.get("worklogs").items():
-					if not user in self.user_list:
-						continue
-
-					for date, logs in worklogs.items():
-						self._create_or_update_timesheet(project_name, user, date, logs)
-
-	def _create_or_update_timesheet(self, project, user, date, logs):
-		"""
-		Handles multiple scenarios
-		- If timesheet log exists for a worklog, the timesheet log is updated if the timesheet is not submitted
-		- If new worklog is fetched, and if timesheet is submitted, it creates a new timesheet for the same date
-		- If new worklog is fetched, and if timesheet is not submitted, it'll append it to timesheet logs
-		- If timesheet is submitted, doesnt update the timesheet log
-		"""
-		jira_user_account_id = self.jira_id_map.get(user, None)
-		employee = frappe.db.get_value("Employee", {"user_id": user})
-		erpnext_project = self.project_map.get(project, {}).get(
-			"erpnext_project", project
-		)
-		billing_rate = self.project_map.get(project, {}).get("billing_rate", 0)
-		costing_rate = self.user_cost_map.get(user, 0)
-
-		timesheet = _get_timesheet(jira_user_account_id, date, erpnext_project)
-		timesheet.employee = employee
-		timesheet.parent_project = erpnext_project
-		timesheet.jira_user_account_id = jira_user_account_id
-		timesheet.start_date = date
-
-		for log in logs:
-			self._append_or_update_time_log(timesheet, log, billing_rate, costing_rate)
-
-		if timesheet.get("time_logs"):
-			timesheet.flags.ignore_mandatory = True
-			timesheet.flags.ignore_links = True
-			timesheet.flags.ignore_permissions = True
 			timesheet.save()
 
-	def _append_or_update_time_log(self, timesheet, log, billing_rate, costing_rate):
-		"""
-		Updates the existing timesheet log if already present in Timesheet, if not, adds a new
-		log in Timesheet.
-		"""
-		base_billing_rate = flt(billing_rate) * timesheet.exchange_rate
-		base_costing_rate = flt(costing_rate) * timesheet.exchange_rate
-		billing_hours = log.get("timeSpentSeconds", 0) / 3600
-		description = f"{log.get('issueDescription')} ({log.get('_issueKey')})"
-		comments = parse_comments(log.get("comment"))
+	def get_timesheet(self, worklog_id, worklog):
+		erpnext_project = self.project_map[
+			self.issues[worklog.get("jira_issue")].get("project_key")
+		].get("erpnext_project")
 
-		if comments:
-			description += f":\n{comments}"
-
-		_log = {
-			"activity_type": self.jira_settings.activity_type,
-			"from_time": get_datetime_str(log.get("started")),
-			"hours": billing_hours,
-			"project": timesheet.parent_project,
-			"is_billable": True,
-			"description": description,
-			"billing_hours": billing_hours,
-			"base_billing_rate": base_billing_rate,
-			"billing_rate": billing_rate,
-			"base_costing_rate": base_costing_rate,
-			"costing_rate": costing_rate,
-			"base_billing_amount": flt(billing_hours) * flt(base_billing_rate),
-			"billing_amount": flt(billing_hours) * flt(billing_rate),
-			"costing_amount": flt(costing_rate) * flt(billing_hours),
-			"jira_issue": log.get("issueId"),
-			"jira_issue_url": log.get("issueURL"),
-			"jira_worklog": log.get("id"),
-		}
-
-		# Check if a worklog exists in the current timesheet document and updates it
-		_worklog_exists = timesheet.get(
-			key="time_logs", filters={"jira_worklog": log.get("id")}
+		timesheet_detail = frappe.db.exists(
+			"Timesheet Detail",
+			{
+				"jira_issue_url": worklog.get("jira_issue_url"),
+				"jira_issue": worklog.get("jira_issue"),
+				"jira_worklog": worklog_id,
+			},
 		)
-		if _worklog_exists:
-			_worklog_exists[0].update(_log)
-			return
 
-		# Check if a worklog exists in all the timesheets and if not, inserts it.
-		_worklog_exists = frappe.db.exists(
-			{"doctype": "Timesheet Detail", "jira_worklog": log.get("id")}
+		timesheet = frappe.db.exists(
+			"Timesheet",
+			{
+				"jira_user_account_id": worklog.get("account_id"),
+				"start_date": get_date_str(worklog.get("from_time")),
+				"parent_project": erpnext_project,
+				"docstatus": 0,
+			},
 		)
-		if not _worklog_exists:
-			timesheet.append("time_logs", _log)
 
-
-def _get_timesheet(jira_user_account_id, date, erpnext_project):
-	"""
-	Checks for the timesheet based off the employee and date and the docstatus
-	If timesheet exists and it is still in draft state, it'll return the timesheet else will return a new timesheet doc
-	"""
-	_timesheet = frappe.db.exists(
-		{
-			"doctype": "Timesheet",
-			"jira_user_account_id": jira_user_account_id,
-			"start_date": date,
-			"parent_project": erpnext_project,
-			"docstatus": 0,
-		}
-	)
-
-	if _timesheet:
-		return frappe.get_doc("Timesheet", _timesheet[0][0])
-
-	return frappe.new_doc("Timesheet")
+		if timesheet_detail:
+			return frappe.get_doc(
+				"Timesheet",
+				frappe.get_value("Timesheet Detail", timesheet_detail, "parent"),
+			)
+		elif timesheet:
+			return frappe.get_doc("Timesheet", timesheet)
+		else:
+			return frappe.get_doc(
+				{
+					"doctype": "Timesheet",
+					"jira_user_account_id": worklog.get("account_id"),
+					"employee": frappe.db.get_value(
+						"Employee", {"user_id": worklog.get("email")}
+					),
+					"parent_project": erpnext_project,
+					"start_date": worklog.get("date"),
+				}
+			)
 
 
 def parse_comments(comments, list_indent=None):
