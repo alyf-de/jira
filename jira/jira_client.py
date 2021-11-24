@@ -15,14 +15,12 @@ class JiraClient:
 
 	def get_issues_for_project(self, project):
 		url = f"{self.url}/rest/api/3/search"
-		start_at = 0
-		max_results = 100
 		results = []
 		params = {
 			"jql": f"project = {project}",
 			"fields": "summary,description",
-			"startAt": start_at,
-			"maxResults": max_results,
+			"startAt": 0,
+			"maxResults": 100,
 		}
 
 		while True:
@@ -35,10 +33,10 @@ class JiraClient:
 				break
 
 			response = response.json()
-			start_at += max_results
+			params["startAt"] += params["maxResults"]
 			results.extend(response.get("issues"))
 
-			if response.get("total") < start_at:
+			if response.get("total") < params["startAt"]:
 				break
 
 		return results
