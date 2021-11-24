@@ -152,6 +152,7 @@ class JiraWorkspace:
 			{
 				"jira_user_account_id": worklog.get("account_id"),
 				"start_date": get_date_str(worklog.get("from_time")),
+				"end_date": get_date_str(worklog.get("from_time")),
 				"parent_project": erpnext_project,
 				"docstatus": 0,
 			},
