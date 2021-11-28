@@ -2,7 +2,7 @@
 # For license information, please see license.txt
 
 import frappe
-from frappe.utils import now_datetime, get_datetime_str, get_date_str, flt
+from frappe.utils import now_datetime, get_datetime, get_datetime_str, flt
 from jira.jira_client import JiraClient
 
 
@@ -70,12 +70,13 @@ class JiraWorkspace:
 			for worklog in self.jira_client.get_timelogs_by_issue(issue_id).get(
 				"worklogs"
 			):
+				started = get_datetime(get_datetime_str(worklog.get("started")))
 				self.worklogs[worklog.get("id")] = {
 					"jira_issue": issue_id,
 					"jira_issue_url": f"{self.jira_settings.url}/browse/{self.issues[issue_id].get('issue_key')}",
 					"account_id": worklog.get("author", {}).get("accountId"),
 					"email": worklog.get("author", {}).get("emailAddress", None),
-					"from_time": get_datetime_str(worklog.get("started")),
+					"from_time": started,
 					"time_spend_seconds": worklog.get("timeSpentSeconds"),
 					"comment": parse_comments(worklog.get("comment")),
 				}
@@ -86,10 +87,6 @@ class JiraWorkspace:
 				continue
 
 			timesheet = self.get_timesheet(worklog_id, worklog)
-
-			if timesheet.docstatus != 0:
-				continue
-
 			issue = self.issues[worklog.get("jira_issue")]
 			billing_rate = self.project_map.get(issue.get("project_key"), {}).get(
 				"billing_rate", 0
@@ -103,7 +100,7 @@ class JiraWorkspace:
 
 			log = {
 				"activity_type": self.jira_settings.activity_type,
-				"from_time": get_datetime_str(worklog.get("from_time")),
+				"from_time": worklog.get("from_time"),
 				"hours": billing_hours,
 				"project": timesheet.parent_project,
 				"is_billable": True,
@@ -144,6 +141,7 @@ class JiraWorkspace:
 				"jira_issue_url": worklog.get("jira_issue_url"),
 				"jira_issue": worklog.get("jira_issue"),
 				"jira_worklog": worklog_id,
+				"docstatus": 0,
 			},
 		)
 
@@ -151,8 +149,7 @@ class JiraWorkspace:
 			"Timesheet",
 			{
 				"jira_user_account_id": worklog.get("account_id"),
-				"start_date": get_date_str(worklog.get("from_time")),
-				"end_date": get_date_str(worklog.get("from_time")),
+				"start_date": worklog.get("from_time"),
 				"parent_project": erpnext_project,
 				"docstatus": 0,
 			},
