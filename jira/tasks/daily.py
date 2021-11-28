@@ -171,7 +171,7 @@ class JiraWorkspace:
 					"doctype": "Timesheet",
 					"jira_user_account_id": worklog.get("account_id"),
 					"employee": frappe.db.get_value(
-						"Employee", {"user_id": worklog.get("email")}
+						"Employee", {"company_email": worklog.get("email")}
 					),
 					"parent_project": erpnext_project,
 					"start_date": worklog.get("date"),
