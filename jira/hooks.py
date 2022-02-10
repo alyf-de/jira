@@ -2,7 +2,7 @@ from . import __version__ as app_version
 
 app_name = "jira"
 app_title = "Jira Integration"
-app_publisher = "Alyf GmbH"
+app_publisher = "ALYF GmbH"
 app_description = "Jira Integration for ERPNext"
 app_icon = "octicon octicon-file-directory"
 app_color = "grey"

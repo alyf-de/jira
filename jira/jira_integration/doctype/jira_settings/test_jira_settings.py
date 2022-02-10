@@ -1,4 +1,4 @@
-# Copyright (c) 2021, Alyf GmbH and Contributors
+# Copyright (c) 2021, ALYF GmbH and Contributors
 # See license.txt
 
 # import frappe
