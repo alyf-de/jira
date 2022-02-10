@@ -9,6 +9,8 @@ app_color = "grey"
 app_email = "hallo@alyf.de"
 app_license = "MIT"
 
+required_apps = ["erpnext"]
+
 # Includes in <head>
 # ------------------
 
