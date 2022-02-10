@@ -186,6 +186,7 @@ class JiraWorkspace:
 						"Employee", {"company_email": worklog.get("email")}
 					),
 					"parent_project": erpnext_project,
+					"customer": frappe.db.get_value("Project", erpnext_project, "customer"), 
 					"start_date": worklog.get("date"),
 				}
 			)
