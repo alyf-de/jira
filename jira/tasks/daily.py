@@ -173,7 +173,7 @@ class JiraWorkspace:
 		if timesheet_detail:
 			return frappe.get_doc(
 				"Timesheet",
-				frappe.get_value("Timesheet Detail", timesheet_detail, "parent"),
+				frappe.db.get_value("Timesheet Detail", timesheet_detail, "parent"),
 			)
 		elif timesheet:
 			return frappe.get_doc("Timesheet", timesheet)
