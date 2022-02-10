@@ -2,12 +2,14 @@ from . import __version__ as app_version
 
 app_name = "jira"
 app_title = "Jira Integration"
-app_publisher = "Alyf GmbH"
+app_publisher = "ALYF GmbH"
 app_description = "Jira Integration for ERPNext"
 app_icon = "octicon octicon-file-directory"
 app_color = "grey"
 app_email = "hallo@alyf.de"
 app_license = "MIT"
+
+required_apps = ["erpnext"]
 
 # Includes in <head>
 # ------------------
@@ -129,24 +131,24 @@ scheduler_events = {"daily_long": ["jira.tasks.daily.sync_work_logs_from_jira"]}
 # User Data Protection
 # --------------------
 
-user_data_fields = [
-	{
-		"doctype": "{doctype_1}",
-		"filter_by": "{filter_by}",
-		"redact_fields": ["{field_1}", "{field_2}"],
-		"partial": 1,
-	},
-	{
-		"doctype": "{doctype_2}",
-		"filter_by": "{filter_by}",
-		"partial": 1,
-	},
-	{
-		"doctype": "{doctype_3}",
-		"strict": False,
-	},
-	{"doctype": "{doctype_4}"},
-]
+# user_data_fields = [
+#	{
+#		"doctype": "{doctype_1}",
+#		"filter_by": "{filter_by}",
+#		"redact_fields": ["{field_1}", "{field_2}"],
+#		"partial": 1,
+#	},
+#	{
+#		"doctype": "{doctype_2}",
+#		"filter_by": "{filter_by}",
+#		"partial": 1,
+#	},
+#	{
+#		"doctype": "{doctype_3}",
+#		"strict": False,
+#	},
+#	{"doctype": "{doctype_4}"},
+# ]
 
 # Authentication and authorization
 # --------------------------------

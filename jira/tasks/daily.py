@@ -1,8 +1,8 @@
-# Copyright (c) 2021, Alyf GmbH and contributors
+# Copyright (c) 2021, ALYF GmbH and contributors
 # For license information, please see license.txt
 
 import frappe
-from frappe.utils import now_datetime, get_datetime, get_datetime_str, flt
+from frappe.utils import now_datetime, get_datetime, get_datetime_str, flt, getdate
 from jira.jira_client import JiraClient
 
 
@@ -41,6 +41,9 @@ class JiraWorkspace:
 			self.project_map[project.jira_project_key] = {
 				"erpnext_project": project.erpnext_project,
 				"billing_rate": project.billing_rate,
+				"sync_after": getdate(project.sync_after)
+				if project.sync_after
+				else None,
 			}
 
 	def _init_user_costing(self):
@@ -71,6 +74,9 @@ class JiraWorkspace:
 				"worklogs"
 			):
 				started = get_datetime(get_datetime_str(worklog.get("started")))
+				if not self.is_worklog_created_after_sync_date(issue_id, started):
+					continue
+
 				self.worklogs[worklog.get("id")] = {
 					"jira_issue": issue_id,
 					"jira_issue_url": f"{self.jira_settings.url}/browse/{self.issues[issue_id].get('issue_key')}",
@@ -80,6 +86,15 @@ class JiraWorkspace:
 					"time_spend_seconds": worklog.get("timeSpentSeconds"),
 					"comment": parse_comments(worklog.get("comment")),
 				}
+
+	def is_worklog_created_after_sync_date(self, issue_id, worklog_start_date):
+		project_key = self.issues.get(issue_id, {}).get("project_key")
+		sync_after = self.project_map.get(project_key, {}).get("sync_after")
+
+		if not sync_after or getdate(worklog_start_date) >= getdate(sync_after):
+			return True
+
+		return False
 
 	def process_worklogs(self):
 		for worklog_id, worklog in self.worklogs.items():
@@ -158,7 +173,7 @@ class JiraWorkspace:
 		if timesheet_detail:
 			return frappe.get_doc(
 				"Timesheet",
-				frappe.get_value("Timesheet Detail", timesheet_detail, "parent"),
+				frappe.db.get_value("Timesheet Detail", timesheet_detail, "parent"),
 			)
 		elif timesheet:
 			return frappe.get_doc("Timesheet", timesheet)
@@ -171,6 +186,7 @@ class JiraWorkspace:
 						"Employee", {"company_email": worklog.get("email")}
 					),
 					"parent_project": erpnext_project,
+					"customer": frappe.db.get_value("Project", erpnext_project, "customer"), 
 					"start_date": worklog.get("date"),
 				}
 			)
