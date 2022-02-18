@@ -81,7 +81,10 @@ def sync_work_logs(
 			else:
 				timesheet.append("time_logs", time_log)
 
-			timesheet.save()
+			try:
+				timesheet.save()
+			except frappe.exceptions.ValidationError:
+				frappe.log_error(frappe.get_traceback())
 
 
 def get_timesheet(
