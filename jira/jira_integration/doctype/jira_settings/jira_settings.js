@@ -9,7 +9,7 @@ frappe.ui.form.on('Jira Settings', {
 				frappe.call({
 					method: "jira.tasks.daily.sync_work_logs_from_jira",
 					args: {
-						project: frm.doc.name
+						jira_settings_name: frm.doc.name
 					},
 					callback: function (r) {
 						frappe.show_alert({ message: __("Synced"), indicator: 'green' });

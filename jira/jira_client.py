@@ -1,77 +1,60 @@
 # Copyright (c) 2021, ALYF GmbH and contributors
 # For license information, please see license.txt
 
+from typing import Iterator
+
 import requests
-import frappe
-import json
 from requests.auth import HTTPBasicAuth
+
+import frappe
+
+from .jira_issue import JiraIssue
+from .jira_worklog import JiraWorklog
 
 
 class JiraClient:
 	def __init__(self, url, user, api_key) -> None:
 		self.url = url
-		self.auth = HTTPBasicAuth(user, api_key)
-		self.headers = {"Accept": "application/json"}
+		self.session = requests.Session()
+		self.session.auth = HTTPBasicAuth(user, api_key)
+		self.session.headers = {"Accept": "application/json"}
 
-	def get_issues_for_project(self, project):
+	def get(self, url: str, params=None):
+		response = self.session.get(url, params=params)
+
+		try:
+			response.raise_for_status()
+		except requests.HTTPError:
+			frappe.log_error(frappe.get_traceback())
+			return {}
+
+		return response.json()
+
+	def get_issues(self, project: str) -> "Iterator[JiraIssue]":
 		url = f"{self.url}/rest/api/3/search"
-		results = []
 		params = {
 			"jql": f"project = {project}",
-			"fields": "summary,description",
+			"fields": "summary",
 			"startAt": 0,
 			"maxResults": 100,
 		}
 
 		while True:
-			response = requests.request(
-				"GET", url, headers=self.headers, params=params, auth=self.auth
-			)
+			response = self.get(url, params=params)
 
-			if not response.status_code == 200:
-				self.handle_error(response)
+			if not response:
 				break
 
-			response = response.json()
 			params["startAt"] += params["maxResults"]
-			results.extend(response.get("issues"))
+			for issue in response.get("issues"):
+				yield JiraIssue.from_dict(issue)
 
 			if response.get("total") < params["startAt"]:
 				break
 
-		return results
+	def get_worklogs(self, issue: str) -> "list[JiraWorklog]":
+		url = f"{self.url}/rest/api/3/issue/{issue}/worklog"
+		response = self.get(url)
+		results = response.get("worklogs", [])
 
-	def get_timelogs_by_issue(self, issue_id, started_after=None):
-		url = f"{self.url}/rest/api/3/issue/{issue_id}/worklog"
-		params = {}
-		if started_after:
-			params = {"startedAfter": started_after}
-
-		response = requests.request(
-			"GET", url, headers=self.headers, params=params, auth=self.auth
-		)
-		if not response.status_code == 200:
-			self.handle_error(response)
-
-		return response.json() if response else {}
-
-	def handle_error(self, response):
-		response_dump = json.dumps(
-			json.loads(response.text or "{}"),
-			sort_keys=True,
-			indent=4,
-			separators=(",", ": "),
-		)
-
-		if response.status_code == 400:
-			frappe.log_error(
-				message=f"Jira Settings Error: Returned if the JQL query is invalid. \n {response_dump}"
-			)
-		elif response.status_code == 401:
-			frappe.log_error(
-				message=f"Jira Settings Error: Authentication credentials are invalid. \n {response_dump}"
-			)
-		else:
-			frappe.log_error(
-				message=f"Jira Settings Error: Something went wrong with the request. \n {response_dump}"
-			)
+		return [JiraWorklog.from_dict(result) for result in results]

@@ -1,240 +1,171 @@
 # Copyright (c) 2021, ALYF GmbH and contributors
 # For license information, please see license.txt
 
+from datetime import date
+
 import frappe
-from frappe.utils import now_datetime, get_datetime, get_datetime_str, flt, getdate
+from frappe.utils import now_datetime, flt, get_datetime_str, get_date_str
+
+from erpnext.projects.doctype.timesheet.timesheet import Timesheet
+
 from jira.jira_client import JiraClient
+from jira.jira_issue import JiraIssue
+from jira.jira_worklog import JiraWorklog
 
 
 @frappe.whitelist()
-def sync_work_logs_from_jira(project=None):
+def sync_work_logs_from_jira(jira_settings_name=None):
 	filters = {"enabled": 1}
 
-	if project:
-		filters["name"] = project
+	if jira_settings_name:
+		filters["name"] = jira_settings_name
 
-	for jira in frappe.get_all("Jira Settings", filters=filters):
-		jira_settings = frappe.get_doc("Jira Settings", jira.name)
-		JiraWorkspace(jira_settings).sync_work_logs()
+	for name in frappe.get_all("Jira Settings", filters=filters, pluck="name"):
+		jira_settings = frappe.get_doc("Jira Settings", name)
+		jira_client = JiraClient(
+			jira_settings.url,
+			jira_settings.api_user,
+			jira_settings.get_password("api_key"),
+		)
+		for project_map in jira_settings.mappings:
+			sync_work_logs(
+				jira_client=jira_client,
+				activity_type=jira_settings.activity_type,
+				user_cost_map=jira_settings.get_user_cost(),
+				jira_project=project_map.jira_project_key,
+				erpnext_project=project_map.erpnext_project,
+				billing_rate=project_map.billing_rate,
+				sync_after=project_map.sync_after,
+			)
+
 		jira_settings.last_synced_on = now_datetime()
 		jira_settings.save()
 
 
-class JiraWorkspace:
-	def __init__(self, jira_settings):
-		self.jira_settings = jira_settings
-		self.user_list = [user.email for user in self.jira_settings.billing]
-		self.jira_client = JiraClient(
-			jira_settings.url,
-			jira_settings.api_user,
-			jira_settings.get_password(fieldname="api_key"),
-		)
-		self.issues = {}
-		self.worklogs = {}
-		self._init_project_map()
-		self._init_user_costing()
-
-	def _init_project_map(self):
-		self.project_map = {}
-
-		for project in self.jira_settings.mappings:
-			self.project_map[project.jira_project_key] = {
-				"erpnext_project": project.erpnext_project,
-				"billing_rate": project.billing_rate,
-				"sync_after": getdate(project.sync_after)
-				if project.sync_after
-				else None,
-			}
-
-	def _init_user_costing(self):
-		self.user_cost_map = {}
-
-		for user in self.jira_settings.billing:
-			self.user_cost_map[user.email] = user.costing_rate
-
-	def sync_work_logs(self):
-		self.pull_issues()
-		self.pull_worklogs()
-		self.process_worklogs()
-
-	def pull_issues(self):
-		for mapping in self.jira_settings.mappings:
-			project_key = mapping.jira_project_key
-
-			for issue in self.jira_client.get_issues_for_project(project_key):
-				self.issues[issue.get("id")] = {
-					"project_key": project_key,
-					"issue_key": issue.get("key"),
-					"summary": issue.get("fields", {}).get("summary"),
-				}
-
-	def pull_worklogs(self):
-		for issue_id in self.issues.keys():
-			for worklog in self.jira_client.get_timelogs_by_issue(issue_id).get(
-				"worklogs"
-			):
-				started = get_datetime(get_datetime_str(worklog.get("started")))
-				if not self.is_worklog_created_after_sync_date(issue_id, started):
-					continue
-
-				self.worklogs[worklog.get("id")] = {
-					"jira_issue": issue_id,
-					"jira_issue_url": f"{self.jira_settings.url}/browse/{self.issues[issue_id].get('issue_key')}",
-					"account_id": worklog.get("author", {}).get("accountId"),
-					"email": worklog.get("author", {}).get("emailAddress", None),
-					"from_time": started,
-					"time_spend_seconds": worklog.get("timeSpentSeconds"),
-					"comment": parse_comments(worklog.get("comment")),
-				}
-
-	def is_worklog_created_after_sync_date(self, issue_id, worklog_start_date):
-		project_key = self.issues.get(issue_id, {}).get("project_key")
-		sync_after = self.project_map.get(project_key, {}).get("sync_after")
-
-		if not sync_after or getdate(worklog_start_date) >= getdate(sync_after):
-			return True
-
-		return False
-
-	def process_worklogs(self):
-		for worklog_id, worklog in self.worklogs.items():
-			if not worklog.get("email") in self.user_list:
+def sync_work_logs(
+	jira_client: JiraClient,
+	activity_type: str,
+	user_cost_map: "dict[str, float]",
+	jira_project: str,
+	erpnext_project: str,
+	billing_rate: float,
+	sync_after: date = None,
+):
+	for issue in jira_client.get_issues(jira_project):
+		for worklog in jira_client.get_worklogs(issue.id):
+			if sync_after and worklog.from_time.date() < sync_after:
 				continue
 
-			timesheet = self.get_timesheet(worklog_id, worklog)
-			issue = self.issues[worklog.get("jira_issue")]
-			billing_rate = self.project_map.get(issue.get("project_key"), {}).get(
-				"billing_rate", 0
-			)
-			costing_rate = self.user_cost_map.get(worklog.get("email"), 0)
-			billing_hours = worklog.get("time_spend_seconds", 0) / 3600
-			description = f"{issue.get('summary')} ({issue.get('issue_key')})"
+			if worklog.author.email_address not in user_cost_map:
+				continue
 
-			if worklog.get("comment"):
-				description += f":\n{worklog.get('comment')}"
+			timesheet = get_timesheet(issue.url, worklog, erpnext_project)
+			if not timesheet:
+				continue
 
-			log = {
-				"activity_type": self.jira_settings.activity_type,
-				"from_time": worklog.get("from_time"),
-				"hours": billing_hours,
-				"project": timesheet.parent_project,
-				"is_billable": True,
-				"description": description,
-				"billing_hours": billing_hours,
-				"base_billing_rate": billing_rate,
-				"billing_rate": billing_rate,
-				"costing_rate": costing_rate,
-				"base_costing_rate": costing_rate,
-				"billing_amount": flt(billing_hours) * flt(billing_rate),
-				"base_billing_amount": flt(billing_hours) * flt(billing_rate),
-				"costing_amount": flt(billing_hours) * flt(costing_rate),
-				"base_costing_amount": flt(billing_hours) * flt(costing_rate),
-				"jira_issue": worklog.get("jira_issue"),
-				"jira_issue_url": worklog.get("jira_issue_url"),
-				"jira_worklog": worklog_id,
-			}
-
-			worklog_exists = timesheet.get(
-				key="time_logs", filters={"jira_worklog": worklog_id}
+			time_log = get_time_log(
+				worklog=worklog,
+				issue=issue,
+				activity_type=activity_type,
+				project=erpnext_project,
+				billing_rate=billing_rate,
+				costing_rate=user_cost_map.get(worklog.author.email_address, 0),
 			)
 
-			if worklog_exists:
-				worklog_exists[0].update(log)
+			existing_timelog = timesheet.get(
+				key="time_logs", filters={"jira_worklog": worklog.id}
+			)
+
+			if existing_timelog:
+				existing_timelog[0].update(time_log)
 			else:
-				timesheet.append("time_logs", log)
+				timesheet.append("time_logs", time_log)
 
 			timesheet.save()
 
-	def get_timesheet(self, worklog_id, worklog):
-		erpnext_project = self.project_map[
-			self.issues[worklog.get("jira_issue")].get("project_key")
-		].get("erpnext_project")
 
-		timesheet_detail = frappe.db.exists(
-			"Timesheet Detail",
-			{
-				"jira_issue_url": worklog.get("jira_issue_url"),
-				"jira_issue": worklog.get("jira_issue"),
-				"jira_worklog": worklog_id,
-				"docstatus": 0,
-			},
-		)
+def get_timesheet(
+	issue_url: str, worklog: JiraWorklog, erpnext_project: str
+) -> Timesheet:
+	ts_detail_filters = {
+		"jira_issue_url": issue_url,
+		"jira_worklog": worklog.id,
+	}
 
-		timesheet = frappe.db.exists(
+	ts_detail_filters.update({"docstatus": (">", 0)})
+	if frappe.db.exists("Timesheet Detail", ts_detail_filters):
+		# a timesheet for this worklog has already been submitted
+		return None
+
+	ts_detail_filters.update({"docstatus": 0})
+	existing_draft_ts_detail = frappe.db.exists("Timesheet Detail", ts_detail_filters)
+	if existing_draft_ts_detail:
+		return frappe.get_doc(
 			"Timesheet",
-			{
-				"jira_user_account_id": worklog.get("account_id"),
-				"start_date": worklog.get("from_time"),
-				"parent_project": erpnext_project,
-				"docstatus": 0,
-			},
+			frappe.db.get_value("Timesheet Detail", existing_draft_ts_detail, "parent"),
 		)
 
-		if timesheet_detail:
-			return frappe.get_doc(
-				"Timesheet",
-				frappe.db.get_value("Timesheet Detail", timesheet_detail, "parent"),
-			)
-		elif timesheet:
-			return frappe.get_doc("Timesheet", timesheet)
-		else:
-			return frappe.get_doc(
-				{
-					"doctype": "Timesheet",
-					"jira_user_account_id": worklog.get("account_id"),
-					"employee": frappe.db.get_value(
-						"Employee", {"company_email": worklog.get("email")}
-					),
-					"parent_project": erpnext_project,
-					"customer": frappe.db.get_value("Project", erpnext_project, "customer"), 
-					"start_date": worklog.get("date"),
-				}
-			)
+	existing_draft_timesheet = frappe.db.exists(
+		"Timesheet",
+		{
+			"jira_user_account_id": worklog.author.account_id,
+			"start_date": worklog.from_time,
+			"parent_project": erpnext_project,
+			"docstatus": 0,
+		},
+	)
+	if existing_draft_timesheet:
+		return frappe.get_doc("Timesheet", existing_draft_timesheet)
+
+	new_timesheet = frappe.get_doc(
+		{
+			"doctype": "Timesheet",
+			"jira_user_account_id": worklog.author.account_id,
+			"employee": frappe.db.get_value(
+				"Employee", {"company_email": worklog.author.email_address}
+			),
+			"parent_project": erpnext_project,
+			"customer": frappe.db.get_value("Project", erpnext_project, "customer"),
+			"start_date": get_date_str(worklog.from_time),
+		}
+	)
+	return new_timesheet
 
 
-def parse_comments(comments, list_indent=None):
-	"""
-	The structure of the comment content is as per the Atlassian Document Format (ADF)
-	https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/
+def get_time_log(
+	worklog: JiraWorklog,
+	issue: JiraIssue,
+	activity_type: str,
+	project: str,
+	billing_rate: float,
+	costing_rate: float,
+):
+	billing_hours = worklog.time_spent_seconds / 3600
+	description = f"{issue.summary} ({issue.key})"
 
-	To extract the text content, the function is run recursively to get the text
-	extracted from the nested dictionary.
+	if worklog.comment:
+		description += f":\n{worklog.comment}"
 
-	The list structure for bulletList, orderedList is preserved by adding a hyphen
-	to preserve the list structure.
+	billing_amount = flt(billing_hours * billing_rate, precision=2)
+	costing_amount = flt(billing_hours * costing_rate, precision=2)
 
-	The structure has a nested dict structure
-	https://developer.atlassian.com/cloud/jira/platform/apis/document/structure/#json-structure
-
-	Parameters:
-	comments (dict, list): This is either the dict of the comment or just the content of the comment structure
-	list_indent (int): This is used to indent the content if the text is a part of bulletList, orderedList and to add hyphen before rendering the text
-
-	Returns:
-	description (string): Parsed text comment from ADF fromat.
-	"""
-	if not comments:
-		return
-
-	if not list_indent:
-		list_indent = 0
-
-	description = ""
-
-	if isinstance(comments, dict):
-		comments = comments.get("content", [])
-
-	for content in comments:
-		if content.get("text"):
-			# if list starts, the list_index will be set to 1, but while rendering, we do not want the indent
-			# to be visible, hence substracting 1 will give us the correct indent while displaying
-			description += f"\n{(list_indent - 1) * '	' if list_indent else ''}{'- ' if list_indent else ''}{content.get('text')}"
-		elif content.get("content"):
-			if content.get("type") in ["bulletList", "orderedList"]:
-				list_indent += 1
-
-			description += parse_comments(content.get("content"), list_indent)
-		else:
-			description += "\n"
-
-	return description
+	return {
+		"activity_type": activity_type,
+		"from_time": get_datetime_str(worklog.from_time),
+		"hours": flt(billing_hours, precision=3),
+		"project": project,
+		"is_billable": True,
+		"description": description,
+		"billing_hours": billing_hours,
+		"base_billing_rate": billing_rate,
+		"billing_rate": billing_rate,
+		"costing_rate": costing_rate,
+		"base_costing_rate": costing_rate,
+		"billing_amount": billing_amount,
+		"base_billing_amount": billing_amount,
+		"costing_amount": costing_amount,
+		"base_costing_amount": costing_amount,
+		"jira_issue": issue.id,
+		"jira_issue_url": issue.url,
+		"jira_worklog": worklog.id,
+	}
