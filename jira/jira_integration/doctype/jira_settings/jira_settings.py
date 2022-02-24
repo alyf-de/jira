@@ -5,4 +5,5 @@
 from frappe.model.document import Document
 
 class JiraSettings(Document):
-	pass
+	def get_user_cost(self) -> "dict[str, float]":
+		return {user.email: user.costing_rate for user in self.billing}
