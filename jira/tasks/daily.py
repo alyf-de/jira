@@ -77,6 +77,7 @@ def sync_work_logs(
 			)
 
 			if existing_timelog:
+				time_log["is_billable"] = existing_timelog[0].get("is_billable", True)
 				existing_timelog[0].update(time_log)
 			else:
 				timesheet.append("time_logs", time_log)
