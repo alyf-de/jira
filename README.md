@@ -1,4 +1,14 @@
-Jira Integration for ERPNext
+## Jira Integration for ERPNext
+
+Pull work logs from Jira and create **Timesheets** in ERPNext.
+
+Features:
+
+- Connect multiple Jira cloud sites
+- Specify which projects to sync, along with the earliest sync date (per site)
+- Specify which users to sync and at what cost (per site)
+- Syncs automatically every night
+- Option to trigger immediate sync
 
 ### Jira User
 
