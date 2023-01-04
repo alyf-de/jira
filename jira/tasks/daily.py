@@ -13,7 +13,6 @@ from jira.jira_issue import JiraIssue
 from jira.jira_worklog import JiraWorklog
 
 
-@frappe.whitelist()
 def sync_work_logs_from_jira(jira_settings_name=None):
 	filters = {"enabled": 1}
 
