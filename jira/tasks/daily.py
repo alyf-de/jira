@@ -71,11 +71,9 @@ def sync_work_logs(
 				costing_rate=user_cost_map.get(worklog.author.email_address, 0),
 			)
 
-			existing_timelog = timesheet.get(
+			if existing_timelog := timesheet.get(
 				key="time_logs", filters={"jira_worklog": worklog.id}
-			)
-
-			if existing_timelog:
+			):
 				time_log["is_billable"] = existing_timelog[0].get("is_billable", True)
 				existing_timelog[0].update(time_log)
 			else:
@@ -93,22 +91,23 @@ def get_timesheet(
 	ts_detail_filters = {
 		"jira_issue_url": issue_url,
 		"jira_worklog": worklog.id,
+		"docstatus": (">", 0),
 	}
 
-	ts_detail_filters.update({"docstatus": (">", 0)})
 	if frappe.db.exists("Timesheet Detail", ts_detail_filters):
 		# a timesheet for this worklog has already been submitted
 		return None
 
-	ts_detail_filters.update({"docstatus": 0})
-	existing_draft_ts_detail = frappe.db.exists("Timesheet Detail", ts_detail_filters)
-	if existing_draft_ts_detail:
+	ts_detail_filters["docstatus"] = 0
+	if existing_draft_ts_detail := frappe.db.exists(
+		"Timesheet Detail", ts_detail_filters
+	):
 		return frappe.get_doc(
 			"Timesheet",
 			frappe.db.get_value("Timesheet Detail", existing_draft_ts_detail, "parent"),
 		)
 
-	existing_draft_timesheet = frappe.db.exists(
+	if existing_draft_timesheet := frappe.db.exists(
 		"Timesheet",
 		{
 			"jira_user_account_id": worklog.author.account_id,
@@ -116,11 +115,10 @@ def get_timesheet(
 			"parent_project": erpnext_project,
 			"docstatus": 0,
 		},
-	)
-	if existing_draft_timesheet:
+	):
 		return frappe.get_doc("Timesheet", existing_draft_timesheet)
 
-	new_timesheet = frappe.get_doc(
+	return frappe.get_doc(
 		{
 			"doctype": "Timesheet",
 			"jira_user_account_id": worklog.author.account_id,
@@ -128,11 +126,12 @@ def get_timesheet(
 				"Employee", {"company_email": worklog.author.email_address}
 			),
 			"parent_project": erpnext_project,
-			"customer": frappe.db.get_value("Project", erpnext_project, "customer"),
+			"customer": frappe.db.get_value(
+				"Project", erpnext_project, "customer"
+			),
 			"start_date": get_date_str(worklog.from_time),
 		}
 	)
-	return new_timesheet
 
 
 def get_time_log(
